@@ -160,14 +160,17 @@ export function generateDungeon(seed: number, floor: number): Dungeon {
     }
   }
 
+  // Room centers can land on half-tiles. Typed-array writes at fractional
+  // indices are silently ignored, so corridors must iterate over whole tiles
+  // or most rooms end up isolated.
   const carveH = (x1: number, x2: number, y: number): void => {
-    const a = Math.min(x1, x2);
-    const b = Math.max(x1, x2);
+    const a = Math.floor(Math.min(x1, x2));
+    const b = Math.ceil(Math.max(x1, x2));
     for (let x = a; x <= b; x++) set(x, Math.round(y), FLOOR);
   };
   const carveV = (y1: number, y2: number, x: number): void => {
-    const a = Math.min(y1, y2);
-    const b = Math.max(y1, y2);
+    const a = Math.floor(Math.min(y1, y2));
+    const b = Math.ceil(Math.max(y1, y2));
     for (let y = a; y <= b; y++) set(Math.round(x), y, FLOOR);
   };
 
