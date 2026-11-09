@@ -10,6 +10,18 @@
  */
 import type { MonsterKind } from '../types';
 
+export type AmbientKind =
+  | 'drip'
+  | 'creak'
+  | 'distantStep'
+  | 'whisper'
+  | 'groan'
+  | 'breath'
+  | 'chain'
+  | 'slither'
+  | 'knock'
+  | 'distantScream';
+
 export class GameAudio {
   private ac: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -19,6 +31,10 @@ export class GameAudio {
   private droneGain: GainNode | null = null;
   private droneSub: GainNode | null = null;
   private noiseBuffer: AudioBuffer | null = null;
+  private stalkGain: GainNode | null = null;
+  private stalkPan: StereoPannerNode | null = null;
+  private stalkFilter: BiquadFilterNode | null = null;
+  private stalkOsc: OscillatorNode | null = null;
   private beatTimer = 0.4;
   private whisperTimer = 5;
   private ambienceTimer = 4;
@@ -63,6 +79,54 @@ export class GameAudio {
       const data = buf.getChannelData(0);
       for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
       this.noiseBuffer = buf;
+
+      // A second, always-running bed for the nearest hunter. The game loop
+      // drives its gain and stereo direction, so proximity is audible before
+      // the monster is visible. The slow breath LFO keeps it from sounding
+      // like a static hum.
+      const stalkGain = ac.createGain();
+      stalkGain.gain.value = 0;
+      const stalkPan = ac.createStereoPanner();
+      stalkPan.pan.value = 0;
+      stalkGain.connect(stalkPan);
+      stalkPan.connect(master);
+
+      const stalkFilter = ac.createBiquadFilter();
+      stalkFilter.type = 'bandpass';
+      stalkFilter.frequency.value = 320;
+      stalkFilter.Q.value = 1.2;
+
+      const breathGate = ac.createGain();
+      breathGate.gain.value = 0.48;
+      const breathLfo = ac.createOscillator();
+      breathLfo.frequency.value = 0.33;
+      const breathDepth = ac.createGain();
+      breathDepth.gain.value = 0.3;
+      breathLfo.connect(breathDepth);
+      breathDepth.connect(breathGate.gain);
+      breathLfo.start();
+
+      const stalkNoise = ac.createBufferSource();
+      stalkNoise.buffer = buf;
+      stalkNoise.loop = true;
+      stalkNoise.connect(stalkFilter);
+      stalkFilter.connect(breathGate);
+      breathGate.connect(stalkGain);
+      stalkNoise.start();
+
+      const stalkOsc = ac.createOscillator();
+      stalkOsc.type = 'sine';
+      stalkOsc.frequency.value = 42;
+      const stalkOscGain = ac.createGain();
+      stalkOscGain.gain.value = 0.16;
+      stalkOsc.connect(stalkOscGain);
+      stalkOscGain.connect(stalkGain);
+      stalkOsc.start();
+
+      this.stalkGain = stalkGain;
+      this.stalkPan = stalkPan;
+      this.stalkFilter = stalkFilter;
+      this.stalkOsc = stalkOsc;
 
       const filter = ac.createBiquadFilter();
       filter.type = 'lowpass';
@@ -137,6 +201,31 @@ export class GameAudio {
     this.muted = muted;
     if (this.master && this.ac) {
       this.master.gain.setTargetAtTime(muted ? 0 : 0.55, this.ac.currentTime, 0.04);
+    }
+  }
+
+  /** Drives the continuous predator bed from the game loop. */
+  setStalk(intensity: number, pan: number, kind: MonsterKind = 'stalker'): void {
+    const ac = this.ac;
+    if (!ac || !this.stalkGain || !this.stalkPan || !this.stalkFilter || !this.stalkOsc) return;
+    try {
+      const level = Math.max(0, Math.min(1, intensity));
+      const now = ac.currentTime;
+      this.stalkGain.gain.setTargetAtTime(level * 0.11, now, 0.25);
+      this.stalkPan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), now, 0.2);
+      this.stalkFilter.frequency.setTargetAtTime(
+        kind === 'crawler' ? 900 : kind === 'wailer' ? 560 : 315,
+        now,
+        0.45
+      );
+      this.stalkFilter.Q.setTargetAtTime(kind === 'wailer' ? 2.6 : 1.15, now, 0.45);
+      this.stalkOsc.frequency.setTargetAtTime(
+        kind === 'wailer' ? 67 : kind === 'crawler' ? 56 : 43,
+        now,
+        0.45
+      );
+    } catch {
+      /* ignore */
     }
   }
 
@@ -305,18 +394,29 @@ export class GameAudio {
     this.tone(180, 0.5, 'sawtooth', 0.09, 42);
   }
 
-  scream(kind: 'crawler' | 'stalker' | 'wailer'): void {
+  scream(kind: MonsterKind, pan = 0, intensity = 1): void {
+    const v = Math.max(0.08, Math.min(1, intensity));
     if (kind === 'wailer') {
-      this.tone(660, 1.15, 'sawtooth', 0.11, 170);
-      this.tone(990, 0.9, 'sine', 0.05, 240, 0.05);
-      this.noise(1.2, 1400, 0.1, 'bandpass', 0, 400);
+      this.tone(660, 1.15, 'sawtooth', 0.11 * v, 170, 0, pan);
+      this.tone(990, 0.9, 'sine', 0.05 * v, 240, 0.05, pan);
+      this.noise(1.2, 1400, 0.1 * v, 'bandpass', 0, 400, pan);
     } else if (kind === 'stalker') {
-      this.tone(120, 0.75, 'sawtooth', 0.12, 60);
-      this.noise(0.7, 320, 0.16, 'lowpass');
+      this.tone(120, 0.75, 'sawtooth', 0.12 * v, 60, 0, pan);
+      this.noise(0.7, 320, 0.16 * v, 'lowpass', 0, undefined, pan);
     } else {
-      this.noise(0.42, 2600, 0.12, 'highpass');
-      this.tone(880, 0.32, 'square', 0.045, 280);
+      this.noise(0.42, 2600, 0.12 * v, 'highpass', 0, undefined, pan);
+      this.tone(880, 0.32, 'square', 0.045 * v, 280, 0, pan);
     }
+  }
+
+  /** The moment a hunter's attention lands on a player. */
+  detected(kind: MonsterKind, pan = 0, intensity = 1): void {
+    const v = Math.max(0.12, Math.min(1, intensity));
+    this.noise(0.16, 5200, 0.2 * v, 'highpass', 0, undefined, pan);
+    this.tone(29, 0.85, 'sine', 0.3 * v, 20, 0, pan);
+    this.noise(0.55, 1200, 0.08 * v, 'bandpass', 0.02, 260, pan);
+    this.scream(kind, pan, v * 0.92);
+    this.tone(1480, 0.33, 'sawtooth', 0.035 * v, 220, 0.03, -pan * 0.5);
   }
 
   descend(): void {
@@ -362,7 +462,7 @@ export class GameAudio {
   }
 
   /** Small, close sounds that make the room feel occupied. */
-  ambient(kind: 'drip' | 'creak' | 'distantStep' | 'whisper' | 'groan' | 'breath', pan = 0): void {
+  ambient(kind: AmbientKind, pan = 0): void {
     switch (kind) {
       case 'drip':
         this.tone(1180 + Math.random() * 320, 0.1, 'sine', 0.05, 420, 0, pan);
@@ -390,6 +490,29 @@ export class GameAudio {
       case 'breath':
         this.noise(0.55, 620, 0.035, 'bandpass', 0, 380, pan);
         this.noise(0.4, 480, 0.022, 'bandpass', 0.62, 320, pan);
+        break;
+      case 'chain':
+        this.tone(860 + Math.random() * 380, 0.22, 'square', 0.015, 420, 0, pan);
+        this.tone(1080 + Math.random() * 280, 0.18, 'sine', 0.018, 520, 0.07, pan);
+        this.noise(0.28, 2800, 0.022, 'highpass', 0.02, undefined, pan);
+        this.tone(460, 0.3, 'triangle', 0.012, 240, 0.15, pan);
+        break;
+      case 'slither':
+        this.noise(1.1, 240, 0.04, 'bandpass', 0, 880, pan);
+        this.noise(0.8, 620, 0.022, 'bandpass', 0.15, 240, -pan);
+        this.tone(58, 0.9, 'sawtooth', 0.012, 38, 0.1, pan);
+        break;
+      case 'knock':
+        for (let k = 0; k < 3; k++) {
+          this.tone(82, 0.16, 'sine', 0.065, 38, k * 0.21, pan);
+          this.noise(0.12, 420, 0.02, 'lowpass', k * 0.21, 120, pan);
+          this.noise(0.06, 1800, 0.012, 'highpass', k * 0.21 + 0.02, undefined, pan);
+        }
+        break;
+      case 'distantScream':
+        this.tone(330 + Math.random() * 80, 1.8, 'sine', 0.018, 150, 0, pan);
+        this.noise(1.6, 850, 0.018, 'bandpass', 0.1, 320, pan);
+        this.tone(170, 1.2, 'triangle', 0.008, 80, 0.3, -pan);
         break;
       default:
         break;
@@ -424,6 +547,42 @@ export class GameAudio {
     this.noise(0.7, 340, 0.09, 'lowpass', 0.05);
   }
 
+  /** Heavy, unseen footsteps crossing close behind the listener. */
+  passingSteps(fromPan = -0.9, toPan = 0.9, intensity = 1): void {
+    const i = Math.max(0.1, Math.min(1, intensity));
+    const steps = 5 + Math.floor(Math.random() * 2);
+    for (let s = 0; s < steps; s++) {
+      const p = steps === 1 ? 0 : s / (steps - 1);
+      const pan = fromPan + (toPan - fromPan) * p;
+      const delay = s * (0.11 + Math.random() * 0.035);
+      const weight = 0.7 + Math.random() * 0.5;
+      this.tone(47 + Math.random() * 16, 0.22, 'sine', 0.06 * i * weight, 30, delay, pan);
+      this.noise(0.13, 260 + Math.random() * 220, 0.032 * i * weight, 'lowpass', delay, undefined, pan);
+      this.noise(0.06, 1600 + Math.random() * 700, 0.012 * i, 'highpass', delay + 0.01, undefined, pan);
+    }
+    this.noise(0.85, 300, 0.03 * i, 'bandpass', 0.22, 150, fromPan);
+    this.tone(38, 1.25, 'sawtooth', 0.026 * i, 28, 0.1, toPan * 0.5);
+  }
+
+  /** A door, a chain, or something enormous hitting stone. */
+  slam(pan = 0, intensity = 1): void {
+    const i = Math.max(0.1, Math.min(1, intensity));
+    this.noise(0.09, 4200, 0.24 * i, 'highpass', 0, undefined, pan);
+    this.tone(34, 1.0, 'sine', 0.32 * i, 20, 0.01, pan);
+    this.tone(88, 0.5, 'sawtooth', 0.08 * i, 32, 0.01, pan);
+    this.noise(1.1, 900, 0.12 * i, 'lowpass', 0, 70, pan);
+    this.noise(1.8, 2200, 0.035 * i, 'bandpass', 0.08, 420, -pan);
+    this.tone(31, 1.4, 'triangle', 0.2 * i, 18, 0.15, pan);
+  }
+
+  /** An inhale that is much too close, on one side of the head. */
+  behindBreath(pan = 0.65): void {
+    this.noise(0.85, 560, 0.055, 'bandpass', 0, 300, pan);
+    this.noise(0.9, 420, 0.04, 'bandpass', 0.95, 230, pan);
+    this.tone(74, 1.6, 'sine', 0.016, 58, 0, pan);
+    this.noise(0.08, 1800, 0.02, 'highpass', 1.7, undefined, pan);
+  }
+
   /** A full-body flinch: impact first, then the thing behind it. */
   jumpScare(kind: MonsterKind, source: 'monster' | 'apparition' | 'fuse', pan = 0): void {
     const soft = source !== 'monster';
@@ -431,7 +590,7 @@ export class GameAudio {
     this.tone(soft ? 62 : 44, 0.6, 'sine', soft ? 0.18 : 0.32, 24, 0, pan);
     this.noise(0.48, soft ? 1700 : 1100, soft ? 0.1 : 0.16, 'bandpass', 0.02, 220, pan);
     if (source === 'monster') {
-      this.scream(kind);
+      this.scream(kind, pan);
     } else {
       this.whisper();
       this.noise(0.7, 540, 0.05, 'bandpass', 0.1, 280, -pan);
@@ -451,5 +610,11 @@ export class GameAudio {
   lightBuzz(): void {
     this.tone(118, 0.07, 'square', 0.009, 96);
     this.noise(0.05, 4400, 0.012, 'highpass');
+  }
+
+  flashlightClick(on: boolean): void {
+    this.noise(0.035, 4600, 0.045, 'highpass');
+    this.tone(on ? 720 : 540, 0.035, 'square', 0.028, on ? 500 : 380);
+    this.noise(0.06, 1200, 0.025, 'bandpass', 0.02);
   }
 }

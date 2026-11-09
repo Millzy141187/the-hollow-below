@@ -9,7 +9,7 @@ import type {
   Pickup,
   RemotePlayer,
 } from '../types';
-import { GameAudio } from './audio';
+import { GameAudio, type AmbientKind } from './audio';
 import {
   generateDungeon,
   isBlocked,
@@ -193,6 +193,8 @@ export class Game {
   private fuseScareDone = false;
   private whisperText: { text: string; t: number; life: number } | null = null;
   private whisperClock = 38;
+  private unseenClock = 18;
+  private unseenCd = 0;
 
   private peers: PeerPresence[] = [];
   private hostId = '';
@@ -322,6 +324,7 @@ export class Game {
     this.canvas.removeEventListener('mousedown', this.onMouseDown);
     this.canvas.removeEventListener('contextmenu', this.onContextMenu);
     this.resizeObserver?.disconnect();
+    this.audio.setStalk(0, 0, 'stalker');
   }
 
   setPaused(paused: boolean): void {
@@ -329,6 +332,7 @@ export class Game {
     if (paused) {
       this.jumpScare = null;
       this.whisperText = null;
+      this.audio.setStalk(0, 0, 'stalker');
     }
     if (!paused) this.lastFrame = performance.now();
   }
@@ -531,8 +535,7 @@ export class Game {
       const wasHunting = monster.hunt;
       monster.hunt = raw[6] === 1;
       if (monster.hunt && !wasHunting) {
-        this.audio.scream(kind);
-        if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.16);
+        this.detectionCue(monster);
       }
       if (raw.length > 7) monster.attackT = Math.max(monster.attackT, clamp(num(raw[7], 0), 0, 0.32));
       seen.add(id);
@@ -639,8 +642,9 @@ export class Game {
       this.hooks.toast('The battery is dead. Find a cell.', 'warn');
       return;
     }
-    this.player.flashlight = !this.player.flashlight;
-    this.audio.glass();
+    const on = !this.player.flashlight;
+    this.player.flashlight = on;
+    this.audio.flashlightClick(on);
   }
 
   private nearestPickup(): Pickup | null {
@@ -776,6 +780,7 @@ export class Game {
     this.player.dead = true;
     this.jumpScare = null;
     this.whisperText = null;
+    this.audio.setStalk(0, 0, 'stalker');
     this.player.flashlight = false;
     this.player.attackT = 0;
     this.deadAt = this.time;
@@ -920,6 +925,9 @@ export class Game {
     this.fuseScareDone = false;
     this.whisperText = null;
     this.whisperClock = 38;
+    this.unseenClock = 18;
+    this.unseenCd = 0;
+    this.audio.setStalk(0, 0, 'stalker');
     this.ambientClock = 5;
     this.dripClock = 1.6;
     this.scareClock = 18;
@@ -998,6 +1006,21 @@ export class Game {
     this.lastMonsters = this.time;
   }
 
+  /** A directional sub-drop and scream when a hunter notices a living player. */
+  private detectionCue(monster: Monster): void {
+    if (this.player.dead) return;
+    const dx = monster.x - this.player.x;
+    const dy = monster.y - this.player.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 18) return;
+    const pan = Math.sin(angleDiff(Math.atan2(dy, dx), this.player.facing)) * 0.9;
+    const intensity = clamp(1 - dist / 18, 0.2, 1);
+    this.audio.detected(monster.kind, pan, intensity);
+    if (!this.reducedFx && intensity > 0.5) {
+      this.shake = Math.min(1, this.shake + 0.16 * intensity);
+    }
+  }
+
   private updateMonsters(dt: number): void {
     if (!this.isHost) {
       for (const monster of this.monsters.values()) {
@@ -1047,8 +1070,7 @@ export class Game {
         lineOfSight(this.dungeon, monster.x, monster.y, target.x, target.y);
       if (sees) {
         if (!monster.hunt) {
-          this.audio.scream(monster.kind);
-          if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.18);
+          this.detectionCue(monster);
         }
         monster.hunt = true;
         monster.targetId = target.id;
@@ -1267,9 +1289,13 @@ export class Game {
 
     // Dread rises near unseen things and in the dark.
     let nearest = 40;
+    let nearestMonster: Monster | null = null;
     for (const monster of this.monsters.values()) {
       const dist = Math.hypot(monster.x - p.x, monster.y - p.y);
-      if (dist < nearest) nearest = dist;
+      if (dist < nearest) {
+        nearest = dist;
+        nearestMonster = monster;
+      }
     }
     let dreadTarget = 0;
     if (!p.dead) {
@@ -1290,6 +1316,20 @@ export class Game {
       1
     );
     this.audio.update(tension, dt);
+
+    // Proximity is a sound before it is a sight. The predator bed swells and
+    // slides across the listener's ears as a hunter closes in.
+    if (!p.dead && nearestMonster) {
+      const angle = Math.atan2(nearestMonster.y - p.y, nearestMonster.x - p.x);
+      const intensity = Math.pow(clamp((15 - nearest) / 15, 0, 1), 1.5);
+      this.audio.setStalk(
+        intensity,
+        Math.sin(angleDiff(angle, p.facing)) * 0.9,
+        nearestMonster.kind
+      );
+    } else {
+      this.audio.setStalk(0, 0, 'stalker');
+    }
 
     const viewPos = this.getViewTarget();
     this.computeVisibility(viewPos.x, viewPos.y);
@@ -1363,7 +1403,14 @@ export class Game {
       this.ambientClock = 6 + Math.random() * 9;
       const pan = Math.random() * 1.6 - 0.8;
       const roll = Math.random();
-      this.audio.ambient(roll < 0.42 ? 'drip' : roll < 0.72 ? 'creak' : 'distantStep', pan);
+      let cue: AmbientKind = 'drip';
+      if (roll >= 0.93) cue = 'distantScream';
+      else if (roll >= 0.84) cue = 'knock';
+      else if (roll >= 0.73) cue = 'slither';
+      else if (roll >= 0.61) cue = 'chain';
+      else if (roll >= 0.47) cue = 'distantStep';
+      else if (roll >= 0.28) cue = 'creak';
+      this.audio.ambient(cue, pan);
     }
 
     this.breathClock -= dt;
@@ -1495,6 +1542,36 @@ export class Game {
         };
         this.audio.whisper();
       }
+    }
+
+    // Sound-only scares. A face is a flinch; footsteps that cross behind you
+    // are worse because the mind supplies the shape.
+    this.unseenClock -= dt;
+    this.unseenCd = Math.max(0, this.unseenCd - dt);
+    if (!this.jumpScare && this.jumpScareCd <= 0 && this.unseenClock <= 0 && this.unseenCd <= 0) {
+      this.unseenClock = 24 + Math.random() * 24;
+      this.unseenCd = 22 + Math.random() * 20;
+      this.playUnseenScare();
+    }
+  }
+
+  private playUnseenScare(): void {
+    if (this.player.dead || this.jumpScare || this.deathScene || this.ended || this.descendTimer > 0) {
+      return;
+    }
+    const roll = Math.random();
+    if (roll < 0.46) {
+      const from = Math.random() < 0.5 ? -0.95 : 0.95;
+      this.audio.passingSteps(from, -from, 0.9);
+      if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.14);
+    } else if (roll < 0.8) {
+      const pan = Math.random() < 0.5 ? -0.95 : 0.95;
+      this.audio.slam(pan, 1);
+      if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.32);
+    } else {
+      const pan = Math.random() < 0.5 ? -0.7 : 0.7;
+      this.audio.behindBreath(pan);
+      if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.08);
     }
   }
 
@@ -1669,6 +1746,7 @@ export class Game {
     this.ended = true;
     this.jumpScare = null;
     this.whisperText = null;
+    this.audio.setStalk(0, 0, 'stalker');
     this.endedCause = cause;
     if (!this.player.dead) {
       this.player.dead = true;
