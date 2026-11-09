@@ -26,6 +26,8 @@ const TILE = 40;
 const BODY_RADIUS = 0.3;
 const SYNC_HZ = 0.085;
 const MONSTER_HZ = 0.1;
+const FLASHLIGHT_RANGE = 14; // tiles
+const FLASHLIGHT_VISIBILITY = FLASHLIGHT_RANGE + 1;
 
 interface Player {
   x: number;
@@ -1457,7 +1459,9 @@ export class Game {
 
   private computeVisibility(cx: number, cy: number): void {
     this.visible.clear();
-    const radius = !this.player.dead && this.player.flashlight ? 11 : 4;
+    // Cover the torch's full visual reach so lit tiles are not culled before
+    // they can be drawn at the far edge of the beam.
+    const radius = !this.player.dead && this.player.flashlight ? FLASHLIGHT_VISIBILITY : 4;
     const r = Math.ceil(radius);
     const ix = Math.floor(cx);
     const iy = Math.floor(cy);
@@ -3008,7 +3012,7 @@ export class Game {
           0.45,
           1.05
         );
-    const radius = (lightOn ? 14 : 4) * TILE * flicker;
+    const radius = (lightOn ? FLASHLIGHT_RANGE : 4) * TILE * flicker;
     const halfAngle = 0.7;
     const facing = this.player.facing;
 
@@ -3042,10 +3046,11 @@ export class Game {
     if (lightOn) {
       const beamPoints = this.lightPolygon(
         view,
-        14 * flicker,
+        FLASHLIGHT_RANGE * flicker,
         facing - halfAngle,
         facing + halfAngle,
-        72
+        72,
+        true
       );
       hole(beamPoints, radius, [[0, 1], [0.28, 0.99], [0.56, 0.84], [0.82, 0.42], [1, 0]]);
       // A wider, weaker wash makes the edge of the cone feel like air.
@@ -3054,7 +3059,8 @@ export class Game {
         10.5 * flicker,
         facing - 1.08,
         facing + 1.08,
-        56
+        56,
+        true
       );
       hole(spillPoints, 10.5 * TILE, [[0, 0.36], [0.5, 0.2], [1, 0]]);
     }
@@ -3123,10 +3129,11 @@ export class Game {
     if (lightOn) {
       const beamPoints = this.lightPolygon(
         view,
-        14 * flicker,
+        FLASHLIGHT_RANGE * flicker,
         facing - halfAngle,
         facing + halfAngle,
-        72
+        72,
+        true
       );
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
@@ -3144,7 +3151,13 @@ export class Game {
       beamGlow.addColorStop(1, 'rgba(255, 170, 100, 0)');
       ctx.fillStyle = beamGlow;
       ctx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
-      // The wall the beam ends on catches a thin warm rim.
+      // The wall the beam ends on catches a thin warm rim. Stroke only the
+      // far edge, not the two rays running back to the player.
+      ctx.beginPath();
+      ctx.moveTo(beamPoints[1]![0] - camX, beamPoints[1]![1] - camY);
+      for (let i = 2; i < beamPoints.length; i++) {
+        ctx.lineTo(beamPoints[i]![0] - camX, beamPoints[i]![1] - camY);
+      }
       ctx.strokeStyle = 'rgba(255, 190, 126, 0.12)';
       ctx.lineWidth = 2.4;
       ctx.stroke();
@@ -3176,15 +3189,21 @@ export class Game {
     ctx.restore();
   }
 
-  /** Cast a fan of rays to the first wall so light cannot bleed through stone. */
+  /**
+   * Cast a fan of rays to the first wall so light cannot bleed through stone.
+   * For a cone, includeOrigin adds the lamp as the polygon apex; without it
+   * the fan closes across the middle of the beam, lighting a detached crescent.
+   */
   private lightPolygon(
     view: Vec,
     radius: number,
     from: number,
     to: number,
-    rays: number
+    rays: number,
+    includeOrigin = false
   ): Array<[number, number]> {
     const points: Array<[number, number]> = [];
+    if (includeOrigin) points.push([view.x * TILE, view.y * TILE]);
     for (let i = 0; i <= rays; i++) {
       const angle = from + ((to - from) * i) / rays;
       const hit = this.castRay(view.x, view.y, angle, radius);
