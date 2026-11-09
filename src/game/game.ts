@@ -2933,12 +2933,12 @@ export class Game {
     const twitch = Math.sin(monster.phase * 2.7) * 0.022;
 
     ctx.save();
-    const shadow = ctx.createRadialGradient(px, py + 7, 1, px, py + 7, 31);
-    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.62)');
+    const shadow = ctx.createRadialGradient(px, py + 7, 1, px, py + 7, 33);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.68)');
     shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(px, py + 7, 30, 12, 0, 0, Math.PI * 2);
+    ctx.ellipse(px, py + 7, 32, 13, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
 
@@ -2949,262 +2949,555 @@ export class Game {
     ctx.scale(1.1 * breathe, 1.1 / breathe);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    const attacking = monster.attackT > 0;
 
     if (monster.kind === 'crawler') {
-      // Too many joints; skin pulled tight over a borrowed skeleton.
-      ctx.strokeStyle = '#1c1512';
-      ctx.lineWidth = 3.2;
-      for (let i = 0; i < 4; i++) {
-        const side = i < 2 ? -1 : 1;
-        const front = i % 2 === 0;
-        const shoulderY = front ? -4 : 8;
-        const elbowX = side * (13 + (front ? 1 : 3));
-        const elbowY = shoulderY + (front ? -5 : 6) + sway * (front ? 2.5 : -1.5);
-        const clawX = side * (20 + (front ? 2 : 0));
-        const clawY = shoulderY + (front ? -10 : 12) + sway * 2;
-        ctx.beginPath();
-        ctx.moveTo(side * 7, shoulderY);
-        ctx.lineTo(elbowX, elbowY);
-        ctx.lineTo(clawX, clawY);
-        ctx.stroke();
-        ctx.strokeStyle = 'rgba(169, 141, 112, 0.28)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(elbowX, elbowY);
-        ctx.lineTo(clawX + side * 3, clawY + (front ? -3 : 3));
-        ctx.stroke();
-        ctx.strokeStyle = '#1c1512';
-        ctx.lineWidth = 3.2;
-      }
-
-      const body = ctx.createRadialGradient(-5, -2, 2, 0, 4, 20);
-      body.addColorStop(0, '#514036');
-      body.addColorStop(0.55, '#2b211c');
-      body.addColorStop(1, '#120e0c');
-      ctx.fillStyle = body;
-      ctx.beginPath();
-      ctx.ellipse(0, 4, 14, 10, sway * 0.1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(185, 149, 113, 0.32)';
-      ctx.lineWidth = 1.2;
-      for (let i = -2; i <= 2; i++) {
-        ctx.beginPath();
-        ctx.ellipse(0, 3 + i * 2.8, 10 - Math.abs(i), 4, 0, Math.PI * 0.15, Math.PI * 0.85);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(212, 181, 146, 0.22)';
-      ctx.beginPath();
-      ctx.moveTo(0, -7);
-      ctx.lineTo(0, 14);
-      ctx.stroke();
-
-      // Skull and split jaw.
-      const jaw = 1.5 + (hunting ? 2.5 : 0) + Math.abs(sway) * 1.2 + (monster.attackT > 0 ? 3 : 0);
-      ctx.fillStyle = '#382c24';
-      ctx.beginPath();
-      ctx.ellipse(0, -10, 8.5, 6.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#0a0807';
-      ctx.beginPath();
-      ctx.ellipse(0, -7, 6, jaw, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(213, 196, 168, 0.85)';
-      for (let i = -3; i <= 3; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * 1.8, -7 - jaw);
-        ctx.lineTo(i * 1.8, -7 - jaw + 2.4);
-        ctx.lineTo(i * 1.8 + 0.8, -7 - jaw);
-        ctx.fill();
-      }
-      ctx.strokeStyle = 'rgba(126, 27, 20, 0.62)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-3, -4);
-      ctx.lineTo(-5, 4);
-      ctx.moveTo(2, -3);
-      ctx.lineTo(4, 5);
-      ctx.stroke();
-
-      const eyeGlow = hunting ? 0.92 : 0.55;
-      ctx.save();
-      ctx.fillStyle = `rgba(222, 63, 40, ${eyeGlow})`;
-      ctx.shadowColor = 'rgba(232, 58, 36, 0.95)';
-      ctx.shadowBlur = hunting ? 11 : 5;
-      ctx.beginPath();
-      ctx.arc(-3.2, -11, 1.55, 0, Math.PI * 2);
-      ctx.arc(3.2, -11, 1.55, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    } else if (monster.kind === 'stalker') {
-      // A person that kept growing after it should have stopped.
-      const skin = ctx.createLinearGradient(-12, -22, 10, 18);
-      skin.addColorStop(0, '#2d241e');
-      skin.addColorStop(0.55, '#171210');
-      skin.addColorStop(1, '#090807');
-      ctx.fillStyle = skin;
-      ctx.beginPath();
-      ctx.moveTo(-9, 18);
-      ctx.quadraticCurveTo(-12, -2, -6, -16);
-      ctx.quadraticCurveTo(-3, -22, 0, -23);
-      ctx.quadraticCurveTo(3, -22, 6, -16);
-      ctx.quadraticCurveTo(12, -2, 9, 18);
-      ctx.lineTo(4, 13);
-      ctx.lineTo(1, 19);
-      ctx.lineTo(-4, 14);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = 'rgba(187, 163, 133, 0.22)';
-      ctx.lineWidth = 1;
-      for (let i = -3; i <= 3; i++) {
-        ctx.beginPath();
-        ctx.ellipse(0, 1 + i * 3.5, 7.5 - Math.abs(i) * 0.7, 3, 0, Math.PI * 0.1, Math.PI * 0.9);
-        ctx.stroke();
-      }
-
-      // Long arms and extra joints.
-      ctx.strokeStyle = '#100d0b';
-      ctx.lineWidth = 3.4;
-      ctx.beginPath();
-      ctx.moveTo(-7, -10);
-      ctx.quadraticCurveTo(-20, -4 + sway * 2, -17 - lunge * 0.4, 16);
-      ctx.moveTo(7, -10);
-      ctx.quadraticCurveTo(20, -4 - sway * 2, 17 + lunge * 0.4, 16);
-      ctx.stroke();
-      ctx.strokeStyle = 'rgba(162, 141, 116, 0.5)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-18, 14);
-      ctx.lineTo(-21, 18);
-      ctx.moveTo(18, 14);
-      ctx.lineTo(21, 18);
-      ctx.stroke();
-
-      // Pale head, no eyes left to speak of.
-      ctx.fillStyle = '#c8bba5';
-      ctx.beginPath();
-      ctx.ellipse(0, -19, 5.6, 7.4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(62, 47, 37, 0.4)';
-      ctx.beginPath();
-      ctx.ellipse(-2.4, -17.5, 2.2, 4.2, 0.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#080606';
-      ctx.beginPath();
-      ctx.ellipse(-1.9, -20, 1.4, 2.5, 0.08, 0, Math.PI * 2);
-      ctx.ellipse(1.9, -20, 1.4, 2.5, -0.08, 0, Math.PI * 2);
-      ctx.fill();
-      const mouth = 1.2 + (hunting ? 1.4 : 0) + (monster.attackT > 0 ? 1.2 : 0);
-      ctx.strokeStyle = 'rgba(30, 22, 18, 0.9)';
-      ctx.lineWidth = 1.1;
-      ctx.beginPath();
-      ctx.moveTo(-1.7, -14);
-      ctx.lineTo(1.7, -14);
-      ctx.stroke();
-      ctx.fillStyle = '#120d0b';
-      ctx.beginPath();
-      ctx.ellipse(0, -13.5, 1.5, mouth, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(160, 33, 24, 0.4)';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(-2.4, -17);
-      ctx.lineTo(-3.4, -13);
-      ctx.moveTo(2.1, -18);
-      ctx.lineTo(3, -14);
-      ctx.stroke();
+      this.drawCrawlerDemon(ctx, sway, hunting, attacking);
+    } else if (monster.kind === 'wailer') {
+      this.drawWailerDemon(ctx, sway, hunting, attacking);
     } else {
-      // A shroud with nothing human left underneath.
-      const float = Math.sin(monster.phase * 0.8) * 3;
-      ctx.translate(0, -4 + float);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
-      ctx.beginPath();
-      ctx.ellipse(0, 20 - float, 16, 5, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = 'rgba(28, 24, 22, 0.97)';
-      ctx.beginPath();
-      ctx.moveTo(-13, 16);
-      ctx.quadraticCurveTo(-16, -8, -5, -19);
-      ctx.quadraticCurveTo(0, -24, 5, -19);
-      ctx.quadraticCurveTo(16, -8, 13, 16);
-      ctx.lineTo(9, 9 + sway * 2);
-      ctx.lineTo(5, 17);
-      ctx.lineTo(1, 9 - sway * 2);
-      ctx.lineTo(-3, 17);
-      ctx.lineTo(-7, 9 + sway);
-      ctx.lineTo(-10, 15);
-      ctx.closePath();
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(156, 173, 170, 0.2)';
-      ctx.lineWidth = 0.9;
-      for (let i = -4; i <= 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(i * 2, -18);
-        ctx.quadraticCurveTo(i * 4 + Math.sin(monster.phase + i) * 3, -2, i * 6, 17);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = '#cec0aa';
-      ctx.beginPath();
-      ctx.ellipse(0, -12, 5.6, 7, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#080606';
-      ctx.beginPath();
-      ctx.ellipse(-1.9, -13, 1.3, 1.9, 0.08, 0, Math.PI * 2);
-      ctx.ellipse(1.9, -13, 1.3, 1.9, -0.08, 0, Math.PI * 2);
-      ctx.fill();
-      const open = 1.6 + (hunting ? 1.8 : 0) + (monster.attackT > 0 ? 1.4 : 0);
-      ctx.fillStyle = '#0b0807';
-      ctx.beginPath();
-      ctx.ellipse(0, -7.8, 1.4, open, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(178, 164, 143, 0.45)';
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.ellipse(0, -7.8, 1.8, open + 0.7, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(180, 196, 192, 0.08)';
-      ctx.beginPath();
-      ctx.ellipse(0, 2, 17, 24, 0, 0, Math.PI * 2);
-      ctx.fill();
+      this.drawStalkerDemon(ctx, sway, hunting, attacking);
     }
 
     if (monster.flash > 0) {
       ctx.globalAlpha = Math.min(0.5, monster.flash * 4);
       ctx.fillStyle = '#f2e7d5';
       ctx.beginPath();
-      ctx.ellipse(0, -3, 16, 22, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 1, 15, 23, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
 
-    // Wet skin and eyeshine: the only parts of it the torch can really hold.
-    ctx.save();
-    ctx.globalCompositeOperation = 'screen';
-    const sheen = ctx.createRadialGradient(-4, -8, 1, -4, -8, 22);
-    sheen.addColorStop(0, 'rgba(226, 205, 170, 0.13)');
-    sheen.addColorStop(0.55, 'rgba(190, 150, 110, 0.035)');
-    sheen.addColorStop(1, 'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = sheen;
-    ctx.beginPath();
-    ctx.ellipse(-3, -7, 13, 18, -0.2, 0, Math.PI * 2);
-    ctx.fill();
     ctx.restore();
+  }
 
-    if (monster.kind !== 'crawler') {
-      const eyeY = monster.kind === 'wailer' ? -12 : -19;
-      const eyeX = monster.kind === 'wailer' ? 2.4 : 1.9;
-      const glint = 0.4 + Math.sin(this.time * 7.3 + monster.phase * 3) * 0.22;
-      ctx.fillStyle = `rgba(255, 244, 220, ${glint * (hunting ? 0.85 : 0.45)})`;
-      ctx.shadowColor = 'rgba(255, 220, 180, 0.75)';
+  private drawDemonHead(
+    ctx: CanvasRenderingContext2D,
+    y: number,
+    hunting: boolean,
+    attack: boolean,
+    gaping = false
+  ): void {
+    ctx.save();
+
+    // A throat that is too long for the collar.
+    ctx.fillStyle = '#48100d';
+    ctx.beginPath();
+    ctx.moveTo(-3.2, y + 5.5);
+    ctx.lineTo(-5.2, y + 12);
+    ctx.lineTo(5.2, y + 12);
+    ctx.lineTo(3.2, y + 5.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Pointed ears sit behind the skull.
+    ctx.fillStyle = '#651915';
+    ctx.beginPath();
+    ctx.moveTo(-5.5, y - 1);
+    ctx.lineTo(-10.5, y - 4.5);
+    ctx.lineTo(-6.4, y + 4.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(5.5, y - 1);
+    ctx.lineTo(10.5, y - 4.5);
+    ctx.lineTo(6.4, y + 4.2);
+    ctx.closePath();
+    ctx.fill();
+
+    // The horns are the first thing the light catches.
+    const horn = ctx.createLinearGradient(0, y - 20, 0, y - 4);
+    horn.addColorStop(0, '#050404');
+    horn.addColorStop(0.5, '#17100d');
+    horn.addColorStop(1, '#34251e');
+    ctx.fillStyle = horn;
+    ctx.beginPath();
+    ctx.moveTo(-6.2, y - 4.8);
+    ctx.quadraticCurveTo(-13.2, y - 12.8, -9.6, y - 23.5);
+    ctx.quadraticCurveTo(-4.7, y - 15.2, -1.1, y - 7.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(6.2, y - 4.8);
+    ctx.quadraticCurveTo(13.2, y - 12.8, 9.6, y - 23.5);
+    ctx.quadraticCurveTo(4.7, y - 15.2, 1.1, y - 7.2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(190, 151, 124, 0.3)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, y - 7);
+    ctx.quadraticCurveTo(-8.5, y - 13, -7.2, y - 18.6);
+    ctx.moveTo(4.6, y - 7);
+    ctx.quadraticCurveTo(8.5, y - 13, 7.2, y - 18.6);
+    ctx.stroke();
+
+    // Red skin pulled tight over a face that is all appetite.
+    const skin = ctx.createRadialGradient(-2, y - 3.5, 1, 0, y + 1, 11);
+    skin.addColorStop(0, '#b33a2d');
+    skin.addColorStop(0.28, '#85211b');
+    skin.addColorStop(0.6, '#57120f');
+    skin.addColorStop(0.84, '#2d0807');
+    skin.addColorStop(1, '#120303');
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.ellipse(0, y, 6.1, 8.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cheek planes and a narrow jaw keep it from reading as a mask.
+    ctx.fillStyle = 'rgba(46, 8, 8, 0.34)';
+    ctx.beginPath();
+    ctx.ellipse(-3.9, y + 2.3, 2.2, 4.1, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(3.9, y + 2.3, 2.2, 4.1, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(235, 113, 82, 0.23)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-5.2, y - 4);
+    ctx.quadraticCurveTo(-2, y - 7, 1.5, y - 5.4);
+    ctx.stroke();
+
+    // Hollow sockets. There is nothing behind them for the light to find.
+    ctx.fillStyle = '#030202';
+    ctx.beginPath();
+    ctx.ellipse(-2.95, y - 1.6, 2.5, 3.5, -0.22, 0, Math.PI * 2);
+    ctx.ellipse(2.95, y - 1.6, 2.5, 3.5, 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(190, 53, 39, 0.5)';
+    ctx.lineWidth = 0.65;
+    ctx.beginPath();
+    ctx.ellipse(-2.95, y - 1.7, 2.7, 3.65, -0.22, 0, Math.PI * 2);
+    ctx.ellipse(2.95, y - 1.7, 2.7, 3.65, 0.22, 0, Math.PI * 2);
+    ctx.stroke();
+    if (hunting) {
+      ctx.fillStyle = 'rgba(255, 88, 53, 0.82)';
+      ctx.shadowColor = 'rgba(255, 52, 29, 0.95)';
       ctx.shadowBlur = 4;
       ctx.beginPath();
-      ctx.arc(-eyeX, eyeY, 0.55, 0, Math.PI * 2);
-      ctx.arc(eyeX, eyeY, 0.55, 0, Math.PI * 2);
+      ctx.arc(-3.05, y - 1.3, 0.48, 0, Math.PI * 2);
+      ctx.arc(3.05, y - 1.3, 0.48, 0, Math.PI * 2);
       ctx.fill();
       ctx.shadowBlur = 0;
     }
 
+    // Nose slits.
+    ctx.fillStyle = '#230606';
+    ctx.beginPath();
+    ctx.ellipse(-1.1, y + 1.4, 0.65, 1.05, -0.2, 0, Math.PI * 2);
+    ctx.ellipse(1.1, y + 1.4, 0.65, 1.05, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    const open = gaping ? 5 : 2.2 + (hunting ? 1.1 : 0) + (attack ? 1.7 : 0);
+    const mouthWidth = gaping ? 6.3 : 5.8;
+    const mouthY = y + 2.4;
+    ctx.fillStyle = '#190504';
+    ctx.beginPath();
+    ctx.moveTo(-mouthWidth, mouthY);
+    ctx.quadraticCurveTo(-2.8, mouthY - 1.1, 0, mouthY - 0.7);
+    ctx.quadraticCurveTo(2.8, mouthY - 1.1, mouthWidth, mouthY);
+    ctx.quadraticCurveTo(mouthWidth * 0.82, mouthY + open, 0, mouthY + open * 1.08);
+    ctx.quadraticCurveTo(-mouthWidth * 0.82, mouthY + open, -mouthWidth, mouthY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#4f1110';
+    ctx.beginPath();
+    ctx.ellipse(0, mouthY + open * 0.55, mouthWidth * 0.56, open * 0.32, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Too many teeth, all of them exposed.
+    ctx.fillStyle = '#c3b6a1';
+    for (let i = 0; i < 8; i++) {
+      const tx = (i - 3.5) * 1.5;
+      const size = 1.35 + ((i * 7) % 4) * 0.18;
+      ctx.beginPath();
+      ctx.moveTo(tx - 0.52, mouthY - 0.3);
+      ctx.lineTo(tx + 0.03, mouthY + size);
+      ctx.lineTo(tx + 0.58, mouthY - 0.3);
+      ctx.closePath();
+      ctx.fill();
+    }
+    for (let i = 0; i < 7; i++) {
+      const tx = (i - 3) * 1.72;
+      const baseY = mouthY + open * 1.02;
+      ctx.beginPath();
+      ctx.moveTo(tx - 0.5, baseY);
+      ctx.lineTo(tx + 0.04, baseY - 1.4);
+      ctx.lineTo(tx + 0.56, baseY);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(106, 20, 14, 0.62)';
+    ctx.lineWidth = 0.7;
+    ctx.beginPath();
+    ctx.moveTo(-4.7, mouthY + 0.35);
+    ctx.lineTo(-2.1, mouthY + 0.5);
+    ctx.moveTo(4.7, mouthY + 0.35);
+    ctx.lineTo(2.1, mouthY + 0.5);
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  private drawDemonHand(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    angle: number
+  ): void {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.fillStyle = '#5b1411';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 2.1, 2.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#060404';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.15;
+    for (let i = -1; i <= 1; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 1.15, 1);
+      ctx.quadraticCurveTo(i * 2.4, 4, i * 2.8 + 0.4, 6.6 + Math.abs(i) * 0.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private drawStalkerDemon(
+    ctx: CanvasRenderingContext2D,
+    sway: number,
+    hunting: boolean,
+    attack: boolean
+  ): void {
+    const step = sway * (hunting ? 2.1 : 0.7);
+
+    // Long legs and polished shoes.
+    ctx.fillStyle = '#0a0808';
+    ctx.beginPath();
+    ctx.moveTo(-5.2, 10);
+    ctx.quadraticCurveTo(-8, 19, -6.8 + step, 28);
+    ctx.lineTo(-2.1 + step, 28);
+    ctx.lineTo(-1.2, 13);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(5.2, 10);
+    ctx.quadraticCurveTo(8, 19, 6.8 - step, 28);
+    ctx.lineTo(2.1 - step, 28);
+    ctx.lineTo(1.2, 13);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#040303';
+    ctx.beginPath();
+    ctx.ellipse(-4.6 + step, 29, 3.8, 1.6, -0.12, 0, Math.PI * 2);
+    ctx.ellipse(4.6 - step, 29, 3.8, 1.6, 0.12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Sharp pinstripe jacket, narrow waist.
+    const suit = ctx.createLinearGradient(-9, -9, 8, 12);
+    suit.addColorStop(0, '#2b2522');
+    suit.addColorStop(0.38, '#181413');
+    suit.addColorStop(0.75, '#0e0b0b');
+    suit.addColorStop(1, '#070606');
+    ctx.fillStyle = suit;
+    const torso = new Path2D();
+    torso.moveTo(-7.5, -10);
+    torso.quadraticCurveTo(-9.5, -1, -6.2, 12);
+    torso.lineTo(-4.3, 15);
+    torso.lineTo(4.3, 15);
+    torso.lineTo(6.2, 12);
+    torso.quadraticCurveTo(9.5, -1, 7.5, -10);
+    torso.closePath();
+    ctx.fill(torso);
+    ctx.save();
+    ctx.clip(torso);
+    ctx.strokeStyle = 'rgba(158, 130, 109, 0.27)';
+    ctx.lineWidth = 0.52;
+    for (let x = -7; x <= 7; x += 1.7) {
+      ctx.beginPath();
+      ctx.moveTo(x, -10);
+      ctx.lineTo(x + 0.7, 13);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Black shirt, knife-thin tie, peaked lapels.
+    ctx.fillStyle = '#080707';
+    ctx.beginPath();
+    ctx.moveTo(-4.2, -9);
+    ctx.lineTo(0, -2.5);
+    ctx.lineTo(4.2, -9);
+    ctx.lineTo(2.8, -10.4);
+    ctx.lineTo(0, -6.6);
+    ctx.lineTo(-2.8, -10.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#2d2724';
+    ctx.beginPath();
+    ctx.moveTo(-6.4, -9.1);
+    ctx.lineTo(0, -1.8);
+    ctx.lineTo(-3.6, 3.4);
+    ctx.lineTo(-7.2, -6.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(6.4, -9.1);
+    ctx.lineTo(0, -1.8);
+    ctx.lineTo(3.6, 3.4);
+    ctx.lineTo(7.2, -6.1);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#a51f1d';
+    ctx.beginPath();
+    ctx.moveTo(0, -5.1);
+    ctx.lineTo(2.1, -2.8);
+    ctx.lineTo(0.8, 5.8);
+    ctx.lineTo(-0.8, 2.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#d0372d';
+    ctx.beginPath();
+    ctx.moveTo(0, -5.1);
+    ctx.lineTo(1.2, -3.8);
+    ctx.lineTo(0.2, -1.8);
+    ctx.lineTo(-0.7, -3.7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 128, 96, 0.35)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(-0.2, -2.8);
+    ctx.lineTo(0.2, 4.2);
+    ctx.stroke();
+
+    // Sleeves, red wrists, claws.
+    ctx.strokeStyle = '#171312';
+    ctx.lineWidth = 4.4;
+    ctx.beginPath();
+    ctx.moveTo(-7.2, -8);
+    ctx.quadraticCurveTo(-15.2, -1 + sway * 1.4, -14.6, 11.5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(7.2, -8);
+    ctx.quadraticCurveTo(15.2, -2 - sway * 1.4, 14.4, 10.5);
+    ctx.stroke();
+    ctx.strokeStyle = '#4b2520';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-7.4, -7);
+    ctx.quadraticCurveTo(-13.4, -1, -13.1, 7.5);
+    ctx.moveTo(7.4, -7);
+    ctx.quadraticCurveTo(13.4, -2, 13, 6.5);
+    ctx.stroke();
+    ctx.fillStyle = '#5e1412';
+    ctx.beginPath();
+    ctx.ellipse(-14.4, 12.3, 1.4, 1.8, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(14.2, 11.3, 1.4, 1.8, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawDemonHand(ctx, -14.8, 12.9, 0.15);
+    this.drawDemonHand(ctx, 14.6, 11.9, -0.15);
+    ctx.fillStyle = '#a82a25';
+    ctx.beginPath();
+    ctx.moveTo(-5.8, -1.6);
+    ctx.lineTo(-4.3, 0.3);
+    ctx.lineTo(-6.5, 1.8);
+    ctx.closePath();
+    ctx.fill();
+
+    this.drawDemonHead(ctx, -21, hunting, attack);
+  }
+
+  private drawCrawlerDemon(
+    ctx: CanvasRenderingContext2D,
+    sway: number,
+    hunting: boolean,
+    attack: boolean
+  ): void {
+    const pace = sway * 1.5;
+
+    // Four limbs, elbows bending the wrong way.
+    ctx.strokeStyle = '#14100f';
+    ctx.lineWidth = 3.9;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.quadraticCurveTo(-19, -1 + pace, -21, 8);
+    ctx.moveTo(8, 0);
+    ctx.quadraticCurveTo(19, -1 - pace, 21, 8);
+    ctx.moveTo(-7, 7);
+    ctx.quadraticCurveTo(-16, 13, -13, 20);
+    ctx.moveTo(7, 7);
+    ctx.quadraticCurveTo(16, 13, 13, 20);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(137, 56, 44, 0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-18, 0);
+    ctx.lineTo(-20, 6);
+    ctx.moveTo(18, 0);
+    ctx.lineTo(20, 6);
+    ctx.stroke();
+    ctx.fillStyle = '#5e1713';
+    ctx.beginPath();
+    ctx.ellipse(-21, 8.4, 1.5, 2, -0.5, 0, Math.PI * 2);
+    ctx.ellipse(21, 8.4, 1.5, 2, 0.5, 0, Math.PI * 2);
+    ctx.ellipse(-13, 20.3, 1.9, 1.3, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(13, 20.3, 1.9, 1.3, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawDemonHand(ctx, -21.2, 8.8, -0.8);
+    this.drawDemonHand(ctx, 21.2, 8.8, 0.8);
+
+    // A jacket split across a hunched, wrong-angled back.
+    const hide = ctx.createRadialGradient(-4, -4, 2, 0, 4, 18);
+    hide.addColorStop(0, '#302824');
+    hide.addColorStop(0.48, '#191413');
+    hide.addColorStop(1, '#080606');
+    ctx.fillStyle = hide;
+    const body = new Path2D();
+    body.moveTo(-10, -4);
+    body.quadraticCurveTo(-13, 2, -9, 10);
+    body.quadraticCurveTo(0, 13, 9, 10);
+    body.quadraticCurveTo(13, 2, 10, -4);
+    body.quadraticCurveTo(0, -8, -10, -4);
+    body.closePath();
+    ctx.fill(body);
+    ctx.save();
+    ctx.clip(body);
+    ctx.strokeStyle = 'rgba(155, 126, 105, 0.2)';
+    ctx.lineWidth = 0.6;
+    for (let x = -10; x <= 10; x += 2) {
+      ctx.beginPath();
+      ctx.moveTo(x, -7);
+      ctx.lineTo(x - 1.2, 12);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = '#0a0807';
+    ctx.beginPath();
+    ctx.moveTo(-5, -3.5);
+    ctx.lineTo(0, 5.5);
+    ctx.lineTo(5, -3.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#8f1e1b';
+    ctx.beginPath();
+    ctx.moveTo(0, 0.5);
+    ctx.lineTo(2.2, 3);
+    ctx.lineTo(0.7, 10);
+    ctx.lineTo(-1.1, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(205, 163, 131, 0.22)';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-8, 7);
+    ctx.quadraticCurveTo(0, 10.5, 8, 7);
+    ctx.stroke();
+
+    this.drawDemonHead(ctx, -7.5, hunting, attack, true);
+  }
+
+  private drawWailerDemon(
+    ctx: CanvasRenderingContext2D,
+    sway: number,
+    hunting: boolean,
+    attack: boolean
+  ): void {
+    const float = Math.sin(sway * 2.3) * 2.4;
+    ctx.save();
+    ctx.translate(0, float);
+
+    // A long coat that forgets where the floor is.
+    const coat = ctx.createLinearGradient(-18, -10, 14, 23);
+    coat.addColorStop(0, '#2c2724');
+    coat.addColorStop(0.42, '#171312');
+    coat.addColorStop(0.82, '#0b0909');
+    coat.addColorStop(1, '#050404');
+    ctx.fillStyle = coat;
+    const shape = new Path2D();
+    shape.moveTo(-8.5, -10);
+    shape.quadraticCurveTo(-11, 2, -16, 20);
+    shape.lineTo(-11, 17);
+    shape.lineTo(-8, 23);
+    shape.lineTo(-3.5, 18);
+    shape.lineTo(0, 24);
+    shape.lineTo(4.5, 18);
+    shape.lineTo(8, 23);
+    shape.lineTo(11, 17);
+    shape.lineTo(16, 20);
+    shape.quadraticCurveTo(11, 2, 8.5, -10);
+    shape.quadraticCurveTo(0, -14, -8.5, -10);
+    shape.closePath();
+    ctx.fill(shape);
+    ctx.save();
+    ctx.clip(shape);
+    ctx.strokeStyle = 'rgba(154, 126, 106, 0.25)';
+    ctx.lineWidth = 0.55;
+    for (let x = -13; x <= 13; x += 2.1) {
+      ctx.beginPath();
+      ctx.moveTo(x * 0.56, -11);
+      ctx.lineTo(x, 24);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Collar, shirt and the same red tie.
+    ctx.fillStyle = '#080706';
+    ctx.beginPath();
+    ctx.moveTo(-6, -10);
+    ctx.lineTo(0, -3);
+    ctx.lineTo(6, -10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#2b2522';
+    ctx.beginPath();
+    ctx.moveTo(-7.5, -9.5);
+    ctx.lineTo(0, -2.5);
+    ctx.lineTo(-4, 4);
+    ctx.lineTo(-8.6, -6.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(7.5, -9.5);
+    ctx.lineTo(0, -2.5);
+    ctx.lineTo(4, 4);
+    ctx.lineTo(8.6, -6.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#991b19';
+    ctx.beginPath();
+    ctx.moveTo(0, -5.5);
+    ctx.lineTo(2.2, -2.7);
+    ctx.lineTo(0.8, 8);
+    ctx.lineTo(-1, 3.4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Arms held out like a maître d' welcoming you in.
+    ctx.strokeStyle = '#151110';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(-7.6, -7);
+    ctx.quadraticCurveTo(-17, -5 + sway * 1.4, -17.5, 5);
+    ctx.moveTo(7.6, -7);
+    ctx.quadraticCurveTo(17, -5 - sway * 1.4, 17.5, 5);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(190, 149, 121, 0.2)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-8.4, -5);
+    ctx.quadraticCurveTo(-15, -3, -16, 3);
+    ctx.moveTo(8.4, -5);
+    ctx.quadraticCurveTo(15, -3, 16, 3);
+    ctx.stroke();
+    ctx.fillStyle = '#5e1512';
+    ctx.beginPath();
+    ctx.ellipse(-17.4, 5.5, 1.4, 1.8, -0.4, 0, Math.PI * 2);
+    ctx.ellipse(17.4, 5.5, 1.4, 1.8, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    this.drawDemonHand(ctx, -17.8, 5.9, -7.7);
+    this.drawDemonHand(ctx, 17.8, 5.9, 7.7);
+
+    this.drawDemonHead(ctx, -20, hunting, attack, true);
     ctx.restore();
   }
 

@@ -266,648 +266,406 @@ function drawHand(
   ctx.restore();
 }
 
-function sunkenEye(
+function drawSuitedDemonFace(
   ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  rx: number,
-  ry: number,
-  iris: string,
-  blind: boolean,
-  rand: Rand
+  p: number,
+  rand: Rand,
+  kind: MonsterKind
 ): void {
-  const socket = ctx.createRadialGradient(x, y, 1, x, y, rx * 1.8);
-  socket.addColorStop(0, '#030202');
-  socket.addColorStop(0.62, '#080504');
-  socket.addColorStop(1, 'rgba(24, 12, 9, 0)');
-  ctx.fillStyle = socket;
+  const crawler = kind === 'crawler';
+  const wailer = kind === 'wailer';
+  const headScaleX = crawler ? 1.08 : wailer ? 0.88 : 1;
+  const headScaleY = crawler ? 0.92 : wailer ? 1.08 : 1;
+  const hornLength = crawler ? 0.72 : wailer ? 1.08 : 1;
+
+  // The suit arrives before the face does.
+  const suit = ctx.createLinearGradient(-210, 105, 150, 340);
+  suit.addColorStop(0, '#302925');
+  suit.addColorStop(0.32, '#1a1614');
+  suit.addColorStop(0.72, '#0d0a0a');
+  suit.addColorStop(1, '#050404');
+  ctx.fillStyle = suit;
+  const shoulders = new Path2D();
+  shoulders.moveTo(-214, 344);
+  shoulders.quadraticCurveTo(-202, 194, -124, 126);
+  shoulders.quadraticCurveTo(-76, 84, 0, 84);
+  shoulders.quadraticCurveTo(76, 84, 124, 126);
+  shoulders.quadraticCurveTo(202, 194, 214, 344);
+  shoulders.closePath();
+  ctx.fill(shoulders);
+
+  ctx.save();
+  ctx.clip(shoulders);
+  ctx.strokeStyle = 'rgba(190, 159, 133, 0.11)';
+  ctx.lineWidth = 1.2;
+  for (let x = -190; x <= 190; x += 13) {
+    ctx.beginPath();
+    ctx.moveTo(x, 90);
+    ctx.lineTo(x + 14, 350);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // Black shirt and a red tie pulled too tight.
+  ctx.fillStyle = '#070606';
   ctx.beginPath();
-  ctx.ellipse(x, y, rx * 1.7, ry * 1.65, 0.02, 0, Math.PI * 2);
+  ctx.moveTo(-39, 82);
+  ctx.lineTo(0, 143);
+  ctx.lineTo(39, 82);
+  ctx.lineTo(20, 76);
+  ctx.lineTo(0, 108);
+  ctx.lineTo(-20, 76);
+  ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = blind ? '#746955' : '#544333';
+  ctx.fillStyle = '#352d28';
   ctx.beginPath();
-  ctx.ellipse(x, y + ry * 0.12, rx * 0.46, ry * 0.44, 0.02, 0, Math.PI * 2);
+  ctx.moveTo(-118, 142);
+  ctx.lineTo(-25, 104);
+  ctx.lineTo(-8, 224);
+  ctx.lineTo(-76, 196);
+  ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = blind ? 'rgba(181, 166, 137, 0.3)' : 'rgba(196, 126, 83, 0.5)';
-  ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.ellipse(x, y + ry * 0.12, rx * 0.48, ry * 0.46, 0.02, 0, Math.PI * 2);
+  ctx.moveTo(118, 142);
+  ctx.lineTo(25, 104);
+  ctx.lineTo(8, 224);
+  ctx.lineTo(76, 196);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(211, 190, 164, 0.14)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-117, 143);
+  ctx.lineTo(-25, 106);
+  ctx.moveTo(117, 143);
+  ctx.lineTo(25, 106);
   ctx.stroke();
 
-  if (blind) {
-    ctx.fillStyle = 'rgba(220, 211, 191, 0.17)';
-    for (let i = 0; i < 6; i++) {
+  ctx.fillStyle = '#a51f1d';
+  ctx.beginPath();
+  ctx.moveTo(0, 112);
+  ctx.lineTo(20, 139);
+  ctx.lineTo(11, 250);
+  ctx.lineTo(0, 225);
+  ctx.lineTo(-10, 250);
+  ctx.lineTo(-20, 139);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#d23a2d';
+  ctx.beginPath();
+  ctx.moveTo(0, 112);
+  ctx.lineTo(10, 127);
+  ctx.lineTo(0, 143);
+  ctx.lineTo(-10, 127);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 128, 95, 0.36)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(-1, 145);
+  ctx.lineTo(1, 238);
+  ctx.stroke();
+
+  // Pocket square, the only clean thing in the frame.
+  ctx.fillStyle = '#8f1d1a';
+  ctx.beginPath();
+  ctx.moveTo(-153, 238);
+  ctx.lineTo(-137, 228);
+  ctx.lineTo(-128, 246);
+  ctx.lineTo(-142, 255);
+  ctx.closePath();
+  ctx.fill();
+
+  // The neck is far too long.
+  ctx.fillStyle = '#4a100d';
+  ctx.beginPath();
+  ctx.moveTo(-35, 55);
+  ctx.quadraticCurveTo(-40, 103, -55, 145);
+  ctx.lineTo(55, 145);
+  ctx.quadraticCurveTo(40, 103, 35, 55);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(23, 5, 4, 0.58)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.moveTo(-26, 67);
+  ctx.quadraticCurveTo(-33, 102, -43, 134);
+  ctx.moveTo(26, 67);
+  ctx.quadraticCurveTo(33, 102, 43, 134);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.scale(headScaleX, headScaleY);
+
+  // Pointed ears, then the horns behind the skull.
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.scale(side, 1);
+    ctx.fillStyle = '#641611';
+    ctx.beginPath();
+    ctx.moveTo(73, -27);
+    ctx.quadraticCurveTo(111, -59, 127, -37);
+    ctx.quadraticCurveTo(111, 1, 86, 20);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(31, 5, 4, 0.65)';
+    ctx.beginPath();
+    ctx.moveTo(82, -23);
+    ctx.quadraticCurveTo(103, -40, 113, -30);
+    ctx.quadraticCurveTo(102, -9, 88, 7);
+    ctx.closePath();
+    ctx.fill();
+
+    const horn = ctx.createLinearGradient(42, -82, 110, -240);
+    horn.addColorStop(0, '#31241d');
+    horn.addColorStop(0.35, '#100c0a');
+    horn.addColorStop(0.78, '#050404');
+    horn.addColorStop(1, '#020202');
+    ctx.fillStyle = horn;
+    ctx.beginPath();
+    ctx.moveTo(49, -84);
+    ctx.bezierCurveTo(91, -133 * hornLength, 108, -190 * hornLength, 95, -238 * hornLength);
+    ctx.bezierCurveTo(76, -198 * hornLength, 52, -158 * hornLength, 20, -112);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(226, 196, 158, 0.2)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(50, -91);
+    ctx.bezierCurveTo(82, -135 * hornLength, 97, -184 * hornLength, 88, -224 * hornLength);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(5, 4, 3, 0.7)';
+    ctx.lineWidth = 4;
+    for (let i = 1; i <= 3; i++) {
+      const y = -112 - i * 32 * hornLength;
       ctx.beginPath();
-      ctx.ellipse(
-        x + (rand() - 0.5) * rx * 0.6,
-        y + (rand() - 0.5) * ry * 0.5,
-        1 + rand() * 1.8,
-        0.8 + rand() * 1.2,
-        rand() * Math.PI,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
+      ctx.moveTo(52 + i * 9, y);
+      ctx.quadraticCurveTo(70 + i * 8, y + 9, 82 + i * 5, y + 2);
+      ctx.stroke();
     }
-    ctx.fillStyle = 'rgba(20, 15, 12, 0.32)';
+    ctx.restore();
+  }
+
+  // Narrow skull, high cheekbones, a jaw that opens too far.
+  const head = ctx.createRadialGradient(-31, -60, 8, 0, 0, 158);
+  head.addColorStop(0, '#c24632');
+  head.addColorStop(0.25, '#92261e');
+  head.addColorStop(0.56, '#5e130f');
+  head.addColorStop(0.82, '#2b0807');
+  head.addColorStop(1, '#100202');
+  ctx.fillStyle = head;
+  const skull = new Path2D();
+  skull.moveTo(-77, -17);
+  skull.bezierCurveTo(-84, -77, -45, -111, 0, -109);
+  skull.bezierCurveTo(45, -111, 84, -77, 77, -17);
+  skull.bezierCurveTo(76, 28, 55, 66, 26, 88);
+  skull.quadraticCurveTo(0, 104, -26, 88);
+  skull.bezierCurveTo(-55, 66, -76, 28, -77, -17);
+  skull.closePath();
+  ctx.fill(skull);
+
+  // Temporal hollows and brow ridge.
+  ctx.fillStyle = 'rgba(25, 4, 4, 0.4)';
+  ctx.beginPath();
+  ctx.ellipse(-59, -14, 15, 35, -0.2, 0, Math.PI * 2);
+  ctx.ellipse(59, -14, 15, 35, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(23, 4, 3, 0.68)';
+  ctx.lineWidth = 7;
+  ctx.beginPath();
+  ctx.moveTo(-74, -54);
+  ctx.quadraticCurveTo(-33, -78, 0, -72);
+  ctx.quadraticCurveTo(34, -78, 73, -51);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(226, 106, 78, 0.2)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(-69, -61);
+  ctx.quadraticCurveTo(-30, -84, 3, -77);
+  ctx.quadraticCurveTo(39, -82, 68, -58);
+  ctx.stroke();
+
+  // Hollow sockets. No eyes, only an appetite.
+  for (const side of [-1, 1]) {
+    const x = side * 35;
+    const y = -24;
+    const socket = ctx.createRadialGradient(x, y, 2, x, y, 41);
+    socket.addColorStop(0, '#000000');
+    socket.addColorStop(0.62, '#030202');
+    socket.addColorStop(1, 'rgba(29, 5, 5, 0.05)');
+    ctx.fillStyle = socket;
     ctx.beginPath();
-    ctx.ellipse(x, y + ry * 0.12, rx * 0.1, ry * 0.13, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y, 26, 38, side * 0.14, 0, Math.PI * 2);
     ctx.fill();
-  } else {
-    ctx.fillStyle = iris;
+    ctx.strokeStyle = 'rgba(49, 7, 6, 0.9)';
+    ctx.lineWidth = 4.5;
     ctx.beginPath();
-    ctx.ellipse(x - rx * 0.04, y + ry * 0.08, rx * 0.2, ry * 0.24, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#020202';
+    ctx.ellipse(x, y, 26.5, 38.5, side * 0.14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(197, 62, 44, 0.25)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.ellipse(x - rx * 0.03, y + ry * 0.08, rx * 0.075, ry * 0.13, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255, 242, 216, 0.38)';
+    ctx.ellipse(x, y - 3, 23, 33, side * 0.14, Math.PI * 1.05, Math.PI * 1.75);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 70, 38, 0.13)';
     ctx.beginPath();
-    ctx.ellipse(x - rx * 0.14, y - ry * 0.02, rx * 0.055, ry * 0.055, 0.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(8, 4, 3, 0.34)';
-    ctx.beginPath();
-    ctx.ellipse(x, y - ry * 0.16, rx * 0.45, ry * 0.24, 0, Math.PI, Math.PI * 2);
+    ctx.arc(x + side * 3, y + 7, 2.2, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  ctx.strokeStyle = 'rgba(31, 20, 15, 0.9)';
-  ctx.lineWidth = Math.max(1.1, rx * 0.12);
+  // Nose slits.
+  ctx.fillStyle = '#210505';
   ctx.beginPath();
-  ctx.ellipse(x, y, rx * 0.72, ry * 0.7, 0.02, Math.PI * 0.98, Math.PI * 2.03);
-  ctx.stroke();
-  ctx.strokeStyle = 'rgba(196, 159, 127, 0.18)';
-  ctx.lineWidth = 0.9;
-  ctx.beginPath();
-  ctx.ellipse(x, y - ry * 0.12, rx * 0.63, ry * 0.52, 0.02, Math.PI * 1.02, Math.PI * 1.9);
-  ctx.stroke();
-}
-
-function drawCrawlerFace(ctx: CanvasRenderingContext2D, p: number, rand: Rand): void {
-  // Shoulders and haunches behind the skull.
-  const behind = ctx.createRadialGradient(0, 34, 8, 0, 40, 190);
-  behind.addColorStop(0, '#241a15');
-  behind.addColorStop(0.65, '#0d0907');
-  behind.addColorStop(1, 'rgba(4, 3, 3, 0)');
-  ctx.fillStyle = behind;
-  ctx.beginPath();
-  ctx.ellipse(0, 38, 172, 124, 0.02, 0, Math.PI * 2);
+  ctx.ellipse(-10, 20, 4.5, 8, -0.18, 0, Math.PI * 2);
+  ctx.ellipse(10, 20, 4.5, 8, 0.18, 0, Math.PI * 2);
   ctx.fill();
 
-  // Main skull: deliberately uneven.
-  ctx.fillStyle = '#090605';
+  const open =
+    (crawler ? 35 : wailer ? 38 : 25) + smoothstep(0.08, 0.7, p) * (crawler ? 34 : 29);
+  const mouthTop = 40;
+  const mouthBottom = 78 + open;
+  ctx.fillStyle = '#1b0504';
+  const mouth = new Path2D();
+  mouth.moveTo(-80, 34);
+  mouth.quadraticCurveTo(-42, 13, 0, 21);
+  mouth.quadraticCurveTo(42, 13, 80, 34);
+  mouth.quadraticCurveTo(69, 58 + open, 31, 76 + open);
+  mouth.quadraticCurveTo(0, 89 + open, -31, 76 + open);
+  mouth.quadraticCurveTo(-69, 58 + open, -80, 34);
+  mouth.closePath();
+  ctx.fill(mouth);
+  ctx.fillStyle = '#4d0f0c';
   ctx.beginPath();
-  ctx.moveTo(-116, 20);
-  ctx.bezierCurveTo(-124, -42, -82, -84, -24, -92);
-  ctx.bezierCurveTo(4, -96, 18, -101, 34, -94);
-  ctx.bezierCurveTo(85, -82, 119, -40, 118, 22);
-  ctx.bezierCurveTo(112, 70, 78, 99, 34, 107);
-  ctx.lineTo(10, 96);
-  ctx.lineTo(-18, 108);
-  ctx.bezierCurveTo(-72, 104, -108, 68, -116, 20);
-  ctx.closePath();
+  ctx.ellipse(0, mouthTop + open * 0.34, 70, 14 + open * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3e0b0a';
+  ctx.beginPath();
+  ctx.ellipse(0, mouthBottom - 2, 57, 10, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  const skin = ctx.createRadialGradient(-34, -30, 6, -4, 8, 126);
-  skin.addColorStop(0, '#8f7159');
-  skin.addColorStop(0.24, '#69503e');
-  skin.addColorStop(0.56, '#3e2b22');
-  skin.addColorStop(0.82, '#1b120f');
-  skin.addColorStop(1, '#080605');
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.moveTo(-98, -14);
-  ctx.bezierCurveTo(-106, -48, -72, -72, -30, -74);
-  ctx.bezierCurveTo(6, -76, 48, -64, 80, -42);
-  ctx.bezierCurveTo(104, -20, 106, 16, 90, 42);
-  ctx.bezierCurveTo(72, 68, 30, 80, -12, 74);
-  ctx.bezierCurveTo(-56, 70, -96, 42, -98, -14);
-  ctx.closePath();
-  ctx.fill();
-
-  // Cheek plates and brow ridge.
-  ctx.fillStyle = 'rgba(22, 13, 10, 0.58)';
-  ctx.beginPath();
-  ctx.moveTo(-100, 8);
-  ctx.quadraticCurveTo(-74, -34, -45, -31);
-  ctx.quadraticCurveTo(-58, 22, -80, 56);
-  ctx.closePath();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(102, 4);
-  ctx.quadraticCurveTo(78, -36, 48, -34);
-  ctx.quadraticCurveTo(62, 20, 84, 58);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.fillStyle = 'rgba(151, 116, 88, 0.24)';
-  ctx.beginPath();
-  ctx.moveTo(-91, -36);
-  ctx.quadraticCurveTo(-44, -74, 16, -71);
-  ctx.quadraticCurveTo(66, -62, 92, -29);
-  ctx.quadraticCurveTo(44, -49, 0, -48);
-  ctx.quadraticCurveTo(-46, -48, -91, -36);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(15, 9, 7, 0.7)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-101, -26);
-  ctx.quadraticCurveTo(-52, -58, 8, -57);
-  ctx.quadraticCurveTo(55, -53, 101, -23);
-  ctx.stroke();
-
-  // Four uneven, deep-set eyes.
-  sunkenEye(ctx, -43, -28, 11, 14, '#8d3e2b', true, rand);
-  sunkenEye(ctx, -16, -37, 7, 9, '#9c5434', false, rand);
-  sunkenEye(ctx, 17, -37, 8, 10, '#9c5434', false, rand);
-  sunkenEye(ctx, 43, -27, 11.5, 14.5, '#8f3f2b', false, rand);
-
-  // Nostril slits and a ridge of exposed bone.
-  ctx.fillStyle = '#120a08';
-  ctx.beginPath();
-  ctx.ellipse(-11, -2, 5, 2.8, -0.2, 0, Math.PI * 2);
-  ctx.ellipse(11, -2, 5, 2.8, 0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(206, 183, 151, 0.32)';
-  ctx.lineWidth = 1.4;
-  ctx.beginPath();
-  ctx.moveTo(0, -20);
-  ctx.lineTo(0, -5);
-  ctx.moveTo(-6, -6);
-  ctx.quadraticCurveTo(0, -9, 6, -6);
-  ctx.stroke();
-
-  // Torn lips, gums and throat.
-  const open = 10 + smoothstep(0.12, 0.7, p) * 34;
-  const mouthY = 34 + open * 0.26;
-  ctx.fillStyle = '#250c0a';
-  ctx.beginPath();
-  ctx.moveTo(-77, 18);
-  ctx.quadraticCurveTo(-48, 5, -17, 8);
-  ctx.quadraticCurveTo(0, 11, 17, 8);
-  ctx.quadraticCurveTo(50, 5, 79, 20);
-  ctx.quadraticCurveTo(66, 45 + open * 0.38, 31, 47 + open * 0.36);
-  ctx.quadraticCurveTo(0, 50 + open * 0.42, -32, 47 + open * 0.34);
-  ctx.quadraticCurveTo(-67, 43 + open * 0.34, -77, 18);
-  ctx.closePath();
-  ctx.fill();
-
-  const throat = ctx.createRadialGradient(0, mouthY, 2, 0, mouthY, 70);
-  throat.addColorStop(0, '#020101');
-  throat.addColorStop(0.7, '#0a0303');
-  throat.addColorStop(1, '#260a08');
-  ctx.fillStyle = throat;
-  ctx.beginPath();
-  ctx.ellipse(0, mouthY, 65, open, 0.01, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#4f211b';
-  ctx.beginPath();
-  ctx.ellipse(0, mouthY - open * 0.62, 58, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#55231d';
-  ctx.beginPath();
-  ctx.ellipse(0, mouthY + open * 0.66, 52, 7, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  const tongue = ctx.createLinearGradient(0, mouthY + open * 0.1, 0, mouthY + open * 0.88);
-  tongue.addColorStop(0, '#5d2827');
-  tongue.addColorStop(0.65, '#351416');
-  tongue.addColorStop(1, '#1b090b');
+  // A tongue that does not belong in a mouth.
+  const tongue = ctx.createLinearGradient(0, mouthTop + open * 0.25, 0, mouthBottom);
+  tongue.addColorStop(0, '#5b2220');
+  tongue.addColorStop(0.6, '#361013');
+  tongue.addColorStop(1, '#1a0709');
   ctx.fillStyle = tongue;
   ctx.beginPath();
-  ctx.moveTo(-25, mouthY + open * 0.2);
-  ctx.quadraticCurveTo(-9, mouthY + open * 0.75, 3, mouthY + open * 0.84);
-  ctx.quadraticCurveTo(18, mouthY + open * 0.8, 28, mouthY + open * 0.28);
-  ctx.quadraticCurveTo(8, mouthY + open * 0.48, -2, mouthY + open * 0.38);
+  ctx.moveTo(-27, mouthTop + open * 0.3);
+  ctx.quadraticCurveTo(-8, mouthTop + open * 0.66, 4, mouthBottom - 8);
+  ctx.quadraticCurveTo(20, mouthTop + open * 0.63, 31, mouthTop + open * 0.27);
+  ctx.quadraticCurveTo(6, mouthTop + open * 0.43, -3, mouthTop + open * 0.38);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = 'rgba(220, 144, 133, 0.2)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-11, mouthY + open * 0.38);
-  ctx.quadraticCurveTo(0, mouthY + open * 0.58, 8, mouthY + open * 0.44);
-  ctx.stroke();
 
-  // Irregular, stained teeth with gaps and broken stumps.
-  const teeth = 9;
-  for (let i = 0; i < teeth; i++) {
-    if (i === 3) continue;
-    const x = (i - (teeth - 1) / 2) * 12.4;
-    const y = mouthY - open * 0.87 + Math.abs(x) * 0.045;
-    const length = 7 + ((i * 7) % 5) * 1.8 + rand() * 3;
-    const broken = i === 4 || i === 7;
+  // Needle teeth, packed edge to edge.
+  const topTeeth = 12;
+  for (let i = 0; i < topTeeth; i++) {
+    if (i === 4 || i === 9) continue;
+    const x = (i - (topTeeth - 1) / 2) * 11;
+    const y = mouthTop + Math.abs(x) * 0.07;
+    const length = 17 + ((i * 7) % 5) * 3 + rand() * 4;
+    const broken = i === 2 || i === 10;
     drawTooth(
       ctx,
       x,
       y,
-      broken ? 7 : 8.5 + rand() * 2,
-      broken ? 3.5 : length,
-      (rand() - 0.5) * 0.2,
-      broken ? '#6c5d4a' : i % 3 === 0 ? '#a18d73' : '#b7a487'
+      7.6 + rand() * 2.2,
+      broken ? 9 : length,
+      (rand() - 0.5) * 0.12,
+      broken ? '#665b4c' : i % 3 === 0 ? '#b3a48d' : '#d0c3aa'
     );
   }
-  for (let i = 0; i < 7; i++) {
-    if (i === 2) continue;
-    const x = (i - 3) * 14.2;
-    const y = mouthY + open * 0.85 - Math.abs(x) * 0.04;
-    const length = -(6 + ((i * 5) % 4) * 1.7 + rand() * 2);
-    drawTooth(ctx, x, y, 8 + rand() * 2, length, (rand() - 0.5) * 0.2, '#9b876d');
+  const bottomTeeth = 10;
+  for (let i = 0; i < bottomTeeth; i++) {
+    if (i === 3 || i === 7) continue;
+    const x = (i - (bottomTeeth - 1) / 2) * 12.4;
+    const y = mouthBottom - 2 - Math.abs(x) * 0.04;
+    const length = 14 + ((i * 5) % 4) * 2.8 + rand() * 3;
+    drawTooth(
+      ctx,
+      x,
+      y,
+      8.1 + rand() * 2,
+      -length,
+      (rand() - 0.5) * 0.12,
+      i % 4 === 0 ? '#aa9a81' : '#c6b89e'
+    );
   }
 
-  // Drool and blood.
-  ctx.strokeStyle = 'rgba(207, 186, 158, 0.28)';
-  for (let i = 0; i < 7; i++) {
-    const x = (i - 3) * 14;
-    const startY = mouthY + open * 0.72;
-    ctx.lineWidth = 0.7 + rand() * 0.9;
+  // Gums, drool, and blood at the corners.
+  ctx.strokeStyle = 'rgba(196, 169, 137, 0.24)';
+  for (let i = 0; i < 8; i++) {
+    const x = (i - 3.5) * 15;
+    const startY = mouthTop + open * 0.48;
+    ctx.lineWidth = 1.1 + rand() * 1.6;
     ctx.beginPath();
     ctx.moveTo(x, startY);
-    ctx.quadraticCurveTo(x + 3, startY + 15 + rand() * 12, x + (rand() - 0.5) * 8, startY + 28 + rand() * 24);
+    ctx.quadraticCurveTo(
+      x + (rand() - 0.5) * 10,
+      startY + 22 + rand() * 20,
+      x + (rand() - 0.5) * 9,
+      startY + 45 + rand() * 36
+    );
     ctx.stroke();
   }
-  ctx.strokeStyle = 'rgba(119, 25, 18, 0.55)';
-  for (let i = 0; i < 4; i++) {
-    const x = (i - 1.5) * 21;
-    ctx.lineWidth = 1.2 + rand();
+  ctx.strokeStyle = 'rgba(119, 22, 16, 0.64)';
+  for (let i = 0; i < 5; i++) {
+    const x = (i - 2) * 24;
+    ctx.lineWidth = 2 + rand() * 2;
     ctx.beginPath();
-    ctx.moveTo(x, mouthY + open * 0.7);
-    ctx.quadraticCurveTo(x + 2, mouthY + open + 16, x - 2, mouthY + open + 33 + rand() * 14);
+    ctx.moveTo(x, mouthBottom - 6);
+    ctx.quadraticCurveTo(x + 4, mouthBottom + 27, x - 3, mouthBottom + 48 + rand() * 26);
     ctx.stroke();
   }
 
-  // Scars, pores and veins.
-  mottle(ctx, rand, -4, 2, 88, 55, 92, [197, 160, 124], 0.075);
-  mottle(ctx, rand, 22, 16, 67, 40, 55, [32, 16, 12], 0.12);
-  veins(ctx, rand, -44, 10, 65, 40, 12, [94, 48, 42], 0.24);
-  veins(ctx, rand, 45, 8, 58, 34, 10, [91, 48, 42], 0.2);
-  ctx.strokeStyle = 'rgba(34, 17, 13, 0.6)';
-  ctx.lineWidth = 1.2;
+  // Smile creases and a chin that has seen too much.
+  ctx.strokeStyle = 'rgba(32, 5, 4, 0.72)';
+  ctx.lineWidth = 4;
   ctx.beginPath();
-  ctx.moveTo(-67, 27);
-  ctx.quadraticCurveTo(-53, 34, -44, 51);
-  ctx.moveTo(72, 24);
-  ctx.quadraticCurveTo(58, 34, 47, 52);
+  ctx.moveTo(-74, 32);
+  ctx.quadraticCurveTo(-91, 50, -82, 82);
+  ctx.moveTo(74, 32);
+  ctx.quadraticCurveTo(91, 50, 82, 82);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(224, 103, 77, 0.22)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(-68, 39);
+  ctx.quadraticCurveTo(-80, 55, -74, 74);
+  ctx.moveTo(68, 39);
+  ctx.quadraticCurveTo(80, 55, 74, 74);
   ctx.stroke();
 
-  // Wet sheen on the brow and cheek.
+  // Pores, veins and the wet shine of skin.
+  mottle(ctx, rand, 0, 3, 67, 84, 120, [222, 116, 90], 0.06);
+  mottle(ctx, rand, 21, 28, 45, 48, 60, [28, 5, 4], 0.13);
+  veins(ctx, rand, -42, 22, 65, 58, 15, [75, 18, 15], 0.24);
+  veins(ctx, rand, 43, 18, 56, 52, 13, [71, 17, 15], 0.21);
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
-  const sheen = ctx.createRadialGradient(-46, -43, 2, -40, -38, 48);
-  sheen.addColorStop(0, 'rgba(221, 190, 153, 0.16)');
-  sheen.addColorStop(1, 'rgba(221, 190, 153, 0)');
+  const sheen = ctx.createRadialGradient(-42, -69, 3, -36, -58, 64);
+  sheen.addColorStop(0, 'rgba(255, 214, 184, 0.18)');
+  sheen.addColorStop(1, 'rgba(255, 214, 184, 0)');
   ctx.fillStyle = sheen;
   ctx.beginPath();
-  ctx.ellipse(-40, -38, 50, 25, -0.18, 0, Math.PI * 2);
+  ctx.ellipse(-34, -58, 66, 35, -0.18, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
+  ctx.restore();
+}
+
+function drawCrawlerFace(ctx: CanvasRenderingContext2D, p: number, rand: Rand): void {
+  drawSuitedDemonFace(ctx, p, rand, 'crawler');
 }
 
 function drawStalkerFace(ctx: CanvasRenderingContext2D, p: number, rand: Rand): void {
-  // Too-wide shoulders and a neck that should not bend that way.
-  ctx.fillStyle = '#080605';
-  ctx.beginPath();
-  ctx.moveTo(-178, 248);
-  ctx.quadraticCurveTo(-132, 102, -57, 47);
-  ctx.quadraticCurveTo(-23, 25, 0, 26);
-  ctx.quadraticCurveTo(26, 24, 58, 47);
-  ctx.quadraticCurveTo(134, 102, 178, 248);
-  ctx.closePath();
-  ctx.fill();
-
-  const neck = ctx.createLinearGradient(-26, 18, 30, 104);
-  neck.addColorStop(0, '#382a22');
-  neck.addColorStop(0.6, '#1a120e');
-  neck.addColorStop(1, '#090706');
-  ctx.fillStyle = neck;
-  ctx.beginPath();
-  ctx.moveTo(-25, 28);
-  ctx.quadraticCurveTo(-31, 64, -43, 92);
-  ctx.quadraticCurveTo(0, 108, 44, 90);
-  ctx.quadraticCurveTo(31, 63, 25, 27);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(177, 143, 111, 0.18)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(-16, 36);
-  ctx.quadraticCurveTo(-15, 65, -20, 87);
-  ctx.moveTo(14, 35);
-  ctx.quadraticCurveTo(17, 65, 22, 88);
-  ctx.stroke();
-
-  // Head is tilted and not quite symmetrical.
-  ctx.save();
-  ctx.translate(0, -22);
-  ctx.rotate(-0.028);
-
-  ctx.fillStyle = '#0b0807';
-  ctx.beginPath();
-  ctx.moveTo(-53, 55);
-  ctx.bezierCurveTo(-66, 6, -53, -64, -23, -92);
-  ctx.bezierCurveTo(-5, -109, 24, -104, 43, -82);
-  ctx.bezierCurveTo(65, -55, 67, 2, 48, 48);
-  ctx.bezierCurveTo(34, 78, 4, 92, -23, 76);
-  ctx.closePath();
-  ctx.fill();
-
-  const skin = ctx.createRadialGradient(-17, -38, 4, 5, -8, 96);
-  skin.addColorStop(0, '#d7c9b2');
-  skin.addColorStop(0.25, '#b7a58c');
-  skin.addColorStop(0.58, '#796752');
-  skin.addColorStop(0.82, '#3c3026');
-  skin.addColorStop(1, '#17110e');
-  ctx.fillStyle = skin;
-  ctx.beginPath();
-  ctx.ellipse(0, -18, 46, 66, -0.015, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Forehead shadow and cheek hollows.
-  ctx.fillStyle = 'rgba(34, 26, 20, 0.42)';
-  ctx.beginPath();
-  ctx.ellipse(0, -67, 38, 20, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.ellipse(-28, 4, 16, 31, 0.28, 0, Math.PI * 2);
-  ctx.ellipse(28, 4, 15, 30, -0.28, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Brow, eye sockets, nose and mouth.
-  ctx.strokeStyle = 'rgba(35, 25, 19, 0.75)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(-42, -44);
-  ctx.quadraticCurveTo(-22, -58, 0, -55);
-  ctx.quadraticCurveTo(24, -58, 43, -43);
-  ctx.stroke();
-
-  sunkenEye(ctx, -20, -33, 10, 14, '#7a382a', true, rand);
-  sunkenEye(ctx, 21, -32, 9.5, 13.5, '#8e412d', false, rand);
-
-  ctx.strokeStyle = 'rgba(86, 61, 45, 0.58)';
-  ctx.lineWidth = 2.2;
-  ctx.beginPath();
-  ctx.moveTo(0, -37);
-  ctx.quadraticCurveTo(5, -18, -2, -7);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(25, 14, 11, 0.8)';
-  ctx.beginPath();
-  ctx.ellipse(-8, -4, 4.2, 2.4, 0.28, 0, Math.PI * 2);
-  ctx.ellipse(8, -4, 4.2, 2.4, -0.28, 0, Math.PI * 2);
-  ctx.fill();
-
-  const open = 3 + smoothstep(0.16, 0.72, p) * 19;
-  ctx.fillStyle = '#210c0a';
-  ctx.beginPath();
-  ctx.moveTo(-28, 24);
-  ctx.quadraticCurveTo(-11, 15, 2, 17);
-  ctx.quadraticCurveTo(15, 14, 30, 25);
-  ctx.quadraticCurveTo(24, 34 + open * 0.55, 6, 38 + open * 0.6);
-  ctx.quadraticCurveTo(0, 39 + open * 0.7, -7, 38 + open * 0.6);
-  ctx.quadraticCurveTo(-24, 34 + open * 0.52, -28, 24);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = '#050202';
-  ctx.beginPath();
-  ctx.ellipse(0, 28 + open * 0.26, 19, open * 0.65, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = '#4c1e1a';
-  ctx.beginPath();
-  ctx.ellipse(0, 21, 20, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  for (let i = -4; i <= 4; i++) {
-    if (i === -2 || i === 3) continue;
-    const x = i * 4.2;
-    drawTooth(ctx, x, 27 - open * 0.3, 5.4, 6 + (i % 2 === 0 ? 2 : 0), i * 0.03, '#b3a084');
-    drawTooth(ctx, x, 31 + open * 0.52, 4.9, -5 - Math.abs(i) * 0.4, -i * 0.03, '#9d896e');
-  }
-  ctx.strokeStyle = 'rgba(129, 28, 20, 0.55)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-16, 25);
-  ctx.quadraticCurveTo(-23, 44, -18, 53);
-  ctx.moveTo(17, 28);
-  ctx.quadraticCurveTo(24, 42, 21, 48);
-  ctx.stroke();
-
-  // Matted hair, wet with something dark.
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 22; i++) {
-    const left = i % 2 === 0;
-    const startX = left ? -39 + rand() * 16 : 23 + rand() * 16;
-    const startY = -91 + rand() * 18;
-    const endX = left ? -82 + rand() * 34 : 48 + rand() * 34;
-    const endY = -54 + rand() * 79;
-    ctx.strokeStyle = `rgba(${16 + Math.floor(rand() * 17)}, ${12 + Math.floor(rand() * 12)}, ${9 + Math.floor(rand() * 9)}, ${0.28 + rand() * 0.55})`;
-    ctx.lineWidth = 0.7 + rand() * 2.1;
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.quadraticCurveTo(
-      startX + (rand() - 0.5) * 28,
-      startY + 24 + rand() * 20,
-      endX,
-      endY
-    );
-    ctx.stroke();
-  }
-
-  for (let i = 0; i < 5; i++) {
-    const startX = -22 + rand() * 44;
-    const endX = -15 + rand() * 31;
-    ctx.strokeStyle = `rgba(13, 10, 8, ${0.16 + rand() * 0.2})`;
-    ctx.lineWidth = 0.6 + rand() * 1.2;
-    ctx.beginPath();
-    ctx.moveTo(startX, -94 + rand() * 10);
-    ctx.quadraticCurveTo(startX + (rand() - 0.5) * 18, -68, endX, -45 + rand() * 22);
-    ctx.stroke();
-  }
-
-  // Skin texture, veins and a blood tear.
-  mottle(ctx, rand, 0, -8, 42, 59, 80, [221, 203, 176], 0.07);
-  mottle(ctx, rand, 19, 20, 32, 35, 45, [52, 35, 26], 0.11);
-  veins(ctx, rand, -19, 11, 45, 38, 10, [78, 53, 43], 0.23);
-  veins(ctx, rand, 23, 8, 38, 31, 8, [78, 53, 43], 0.2);
-  ctx.fillStyle = 'rgba(112, 20, 16, 0.56)';
-  ctx.beginPath();
-  ctx.moveTo(23, -17);
-  ctx.quadraticCurveTo(27, 5, 22, 19);
-  ctx.quadraticCurveTo(20, 25, 23, 29);
-  ctx.quadraticCurveTo(26, 17, 27, 2);
-  ctx.quadraticCurveTo(30, -8, 23, -17);
-  ctx.fill();
-
-  ctx.save();
-  ctx.globalCompositeOperation = 'screen';
-  const sheen = ctx.createRadialGradient(-25, -45, 3, -20, -36, 42);
-  sheen.addColorStop(0, 'rgba(238, 222, 198, 0.13)');
-  sheen.addColorStop(1, 'rgba(238, 222, 198, 0)');
-  ctx.fillStyle = sheen;
-  ctx.beginPath();
-  ctx.ellipse(-20, -36, 38, 27, -0.2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  ctx.restore();
+  drawSuitedDemonFace(ctx, p, rand, 'stalker');
 }
 
 function drawWailerFace(ctx: CanvasRenderingContext2D, p: number, rand: Rand): void {
-  // Layered shroud, none of it quite touching the ground.
-  for (let layer = 0; layer < 3; layer++) {
-    const spread = 104 - layer * 13;
-    const alpha = 0.38 + layer * 0.15;
-    const cloth = ctx.createLinearGradient(-spread, -30, spread, 210);
-    cloth.addColorStop(0, `rgba(31, 34, 33, ${alpha})`);
-    cloth.addColorStop(0.45, `rgba(19, 22, 22, ${alpha})`);
-    cloth.addColorStop(1, 'rgba(5, 7, 7, 0.92)');
-    ctx.fillStyle = cloth;
-    ctx.beginPath();
-    ctx.moveTo(-spread, 212);
-    ctx.quadraticCurveTo(-spread - 18, 74, -48 + layer * 5, 10 + layer * 8);
-    ctx.quadraticCurveTo(0, -22 + layer * 4, 48 - layer * 5, 10 + layer * 8);
-    ctx.quadraticCurveTo(spread + 18, 74, spread, 212);
-    const hem = 212 - layer * 15;
-    ctx.lineTo(spread * 0.73, hem - 29);
-    ctx.lineTo(spread * 0.52, hem + 7);
-    ctx.lineTo(spread * 0.31, hem - 31);
-    ctx.lineTo(spread * 0.08, hem + 3);
-    ctx.lineTo(-spread * 0.16, hem - 27);
-    ctx.lineTo(-spread * 0.39, hem + 8);
-    ctx.lineTo(-spread * 0.62, hem - 24);
-    ctx.lineTo(-spread * 0.82, hem + 1);
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // Folds in the fabric.
-  ctx.save();
-  for (let i = -7; i <= 7; i++) {
-    ctx.strokeStyle = `rgba(${125 + Math.floor(rand() * 35)}, ${131 + Math.floor(rand() * 30)}, ${126 + Math.floor(rand() * 25)}, ${0.07 + rand() * 0.12})`;
-    ctx.lineWidth = 0.8 + rand() * 1.8;
-    ctx.beginPath();
-    ctx.moveTo(i * 10, -1 + rand() * 15);
-    ctx.quadraticCurveTo(i * 13 + Math.sin(rand() * 5) * 8, 72, i * 18, 203);
-    ctx.stroke();
-  }
-  ctx.restore();
-
-  // Long pale hair floating around the mask.
-  ctx.lineCap = 'round';
-  for (let i = 0; i < 24; i++) {
-    const startX = -29 + rand() * 58;
-    const startY = -77 + rand() * 16;
-    const endX = -81 + rand() * 162;
-    const endY = -3 + rand() * 150;
-    ctx.strokeStyle = `rgba(${154 + Math.floor(rand() * 40)}, ${148 + Math.floor(rand() * 36)}, ${134 + Math.floor(rand() * 30)}, ${0.1 + rand() * 0.22})`;
-    ctx.lineWidth = 0.5 + rand() * 1.4;
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.quadraticCurveTo(
-      startX + Math.sin(rand() * 9) * 30,
-      startY + 56 + rand() * 40,
-      endX,
-      endY
-    );
-    ctx.stroke();
-  }
-
-  // Cracked funeral mask.
-  const mask = ctx.createRadialGradient(-12, -41, 4, 0, -17, 55);
-  mask.addColorStop(0, '#eee1cc');
-  mask.addColorStop(0.36, '#cbbb9f');
-  mask.addColorStop(0.7, '#8d7d65');
-  mask.addColorStop(0.9, '#4d4235');
-  mask.addColorStop(1, '#211b16');
-  ctx.fillStyle = mask;
-  ctx.beginPath();
-  ctx.moveTo(-31, -77);
-  ctx.quadraticCurveTo(-3, -92, 31, -76);
-  ctx.quadraticCurveTo(47, -40, 36, 8);
-  ctx.quadraticCurveTo(27, 34, 5, 39);
-  ctx.quadraticCurveTo(-21, 44, -36, 16);
-  ctx.quadraticCurveTo(-48, -34, -31, -77);
-  ctx.closePath();
-  ctx.fill();
-
-  ctx.strokeStyle = 'rgba(63, 48, 37, 0.55)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(-19, -78);
-  ctx.quadraticCurveTo(4, -83, 27, -73);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(36, 26, 21, 0.38)';
-  ctx.beginPath();
-  ctx.ellipse(-22, 12, 13, 25, 0.12, 0, Math.PI * 2);
-  ctx.ellipse(23, 10, 11, 23, -0.12, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Hollow sockets and the void behind the mask.
-  const sockets = ctx.createRadialGradient(0, -29, 3, 0, -25, 52);
-  sockets.addColorStop(0, '#030303');
-  sockets.addColorStop(0.6, '#060505');
-  sockets.addColorStop(1, 'rgba(27, 20, 16, 0)');
-  ctx.fillStyle = sockets;
-  ctx.beginPath();
-  ctx.ellipse(-12, -27, 14, 19, 0.1, 0, Math.PI * 2);
-  ctx.ellipse(12, -27, 14, 19, -0.1, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(208, 196, 169, 0.22)';
-  ctx.beginPath();
-  ctx.ellipse(12, -25, 3.6, 6.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // A mouth sewn shut, opening as the mask wakes.
-  const open = 6 + smoothstep(0.18, 0.74, p) * 14;
-  ctx.fillStyle = '#080605';
-  ctx.beginPath();
-  ctx.ellipse(0, 15, 9, open, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(52, 33, 25, 0.75)';
-  ctx.lineWidth = 1.3;
-  for (let i = -2; i <= 2; i++) {
-    const y = 15 + i * 4.5;
-    ctx.beginPath();
-    ctx.moveTo(-9, y);
-    ctx.lineTo(-3, y - 2);
-    ctx.moveTo(9, y);
-    ctx.lineTo(3, y - 2);
-    ctx.stroke();
-  }
-
-  // Cracks and age.
-  ctx.strokeStyle = 'rgba(64, 47, 35, 0.52)';
-  ctx.lineWidth = 1.1;
-  ctx.beginPath();
-  ctx.moveTo(-28, -57);
-  ctx.lineTo(-19, -43);
-  ctx.lineTo(-22, -27);
-  ctx.moveTo(29, -60);
-  ctx.lineTo(23, -46);
-  ctx.lineTo(27, -34);
-  ctx.lineTo(19, -22);
-  ctx.moveTo(-8, -78);
-  ctx.lineTo(-2, -59);
-  ctx.lineTo(-7, -46);
-  ctx.moveTo(9, 32);
-  ctx.lineTo(4, 21);
-  ctx.lineTo(10, 11);
-  ctx.stroke();
-  mottle(ctx, rand, 0, -20, 34, 48, 56, [72, 55, 40], 0.1);
-  mottle(ctx, rand, -7, -39, 23, 19, 24, [255, 246, 224], 0.08);
-
-  // Ritual pigment and gold leaf.
-  ctx.fillStyle = 'rgba(146, 44, 34, 0.32)';
-  ctx.beginPath();
-  ctx.ellipse(0, -56, 17, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(194, 159, 84, 0.4)';
-  for (let i = 0; i < 7; i++) {
-    ctx.fillRect(-20 + rand() * 40, -74 + rand() * 12, 1 + rand() * 3, 1 + rand() * 2);
-  }
-
+  drawSuitedDemonFace(ctx, p, rand, 'wailer');
 }
 
 function drawBackground(
