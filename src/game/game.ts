@@ -88,6 +88,20 @@ interface Ghost {
   seed: number;
 }
 
+type ChallengeKind = 'lookBack' | 'darkness' | 'keepMoving';
+
+/** A phrase in the dust that carries a short, enforceable rule. */
+interface TextChallenge {
+  kind: ChallengeKind;
+  text: string;
+  hint: string;
+  t: number;
+  duration: number;
+  grace: number;
+  facing: number;
+  still: number;
+}
+
 interface GameOptions {
   canvas: HTMLCanvasElement;
   playerId: string;
@@ -191,11 +205,18 @@ export class Game {
   private apparitionClock = 24;
   private seenJumpScare = new Set<string>();
   private fuseScareDone = false;
-  private whisperText: { text: string; t: number; life: number } | null = null;
-  private whisperClock = 38;
+  private challenge: TextChallenge | null = null;
+  private lastChallenge: ChallengeKind | null = null;
+  private whisperClock = 28;
   private unseenClock = 18;
   private unseenCd = 0;
   private panicCd = 0;
+  private invulnUntil = 0;
+  private darkDrain = 0;
+  private darkDrainTick = 0;
+  private darkSourceX = 0;
+  private darkSourceY = 0;
+  private challengeSerial = 0;
 
   private peers: PeerPresence[] = [];
   private hostId = '';
@@ -333,7 +354,6 @@ export class Game {
     this.paused = paused || this.ended;
     if (paused) {
       this.jumpScare = null;
-      this.whisperText = null;
       this.audio.setStalk(0, 0, 'stalker');
     }
     if (!paused) this.lastFrame = performance.now();
@@ -431,6 +451,9 @@ export class Game {
         this.audio.humanScream(kind, pan, clamp(1 - dist / 30, 0.25, 1));
         break;
       }
+      case 'summon':
+        if (this.isHost) this.receiveSummon(data, from);
+        break;
       case 'take':
         if (this.isHost && typeof data.id === 'string') this.grantPickup(data.id, from);
         break;
@@ -458,6 +481,19 @@ export class Game {
       default:
         break;
     }
+  }
+
+  private receiveSummon(data: Record<string, unknown>, from: string): void {
+    if (!this.isHost || !this.remote.has(from)) return;
+    const kind = data.kind;
+    if (!isMonsterKind(kind)) return;
+    const x = num(data.x, NaN);
+    const y = num(data.y, NaN);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (x < 1 || y < 1 || x > this.dungeon.w - 1 || y > this.dungeon.h - 1) return;
+    if (isBlocked(this.dungeon, x, y, 0.26)) return;
+    this.addChallengeMonster(kind, x, y, from);
+    this.sendMonsters();
   }
 
   private receivePlayer(data: Record<string, unknown>, from: string): void {
@@ -783,7 +819,7 @@ export class Game {
   }
 
   private damagePlayer(amount: number, sourceX: number, sourceY: number): void {
-    if (this.player.dead || this.ended) return;
+    if (this.player.dead || this.ended || this.time < this.invulnUntil) return;
     this.player.hp = Math.max(0, this.player.hp - amount);
     this.flashTimer = 0.3;
     this.shake = Math.min(1.2, this.shake + 0.3 + amount / 120);
@@ -806,7 +842,9 @@ export class Game {
     if (this.player.dead) return;
     this.player.dead = true;
     this.jumpScare = null;
-    this.whisperText = null;
+    this.challenge = null;
+    this.darkDrain = 0;
+    this.invulnUntil = 0;
     this.audio.setStalk(0, 0, 'stalker');
     this.player.flashlight = false;
     this.player.attackT = 0;
@@ -953,11 +991,16 @@ export class Game {
     this.apparitionClock = 24;
     this.seenJumpScare.clear();
     this.fuseScareDone = false;
-    this.whisperText = null;
-    this.whisperClock = 38;
+    this.challenge = null;
+    this.lastChallenge = null;
+    this.whisperClock = 28;
     this.unseenClock = 18;
     this.unseenCd = 0;
     this.panicCd = 0;
+    this.invulnUntil = 0;
+    this.darkDrain = 0;
+    this.darkDrainTick = 0;
+    this.challengeSerial = 0;
     this.lastHurtScream = -10;
     this.audio.setStalk(0, 0, 'stalker');
     this.ambientClock = 5;
@@ -995,6 +1038,66 @@ export class Game {
   }
 
   // ── Monsters ──────────────────────────────────────────────────
+
+  private findChallengeSpawn(angle: number): Vec | null {
+    for (let i = 0; i < 24; i++) {
+      const a = angle + (Math.random() - 0.5) * 1.4;
+      const d = 3.2 + Math.random() * 2.8;
+      const x = this.player.x + Math.cos(a) * d;
+      const y = this.player.y + Math.sin(a) * d;
+      if (x < 1 || y < 1 || x > this.dungeon.w - 1 || y > this.dungeon.h - 1) continue;
+      if (isBlocked(this.dungeon, x, y, 0.26)) continue;
+      return { x, y };
+    }
+    // If the room is tight, look for any open pocket around the player.
+    for (let i = 0; i < 32; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const d = 2.4 + Math.random() * 5.5;
+      const x = this.player.x + Math.cos(a) * d;
+      const y = this.player.y + Math.sin(a) * d;
+      if (x < 1 || y < 1 || x > this.dungeon.w - 1 || y > this.dungeon.h - 1) continue;
+      if (isBlocked(this.dungeon, x, y, 0.26)) continue;
+      return { x, y };
+    }
+    return null;
+  }
+
+  private addChallengeMonster(kind: MonsterKind, x: number, y: number, targetId: string): void {
+    if (this.monsters.size >= 50) return;
+    const stats = monsterStats(kind, this.floor);
+    const id = `c${this.floor}-${++this.challengeSerial}`;
+    this.monsters.set(id, {
+      id,
+      kind,
+      x,
+      y,
+      tx: x,
+      ty: y,
+      hp: stats.hp,
+      maxHp: stats.hp,
+      flash: 0,
+      hunt: true,
+      phase: Math.random() * Math.PI * 2,
+      attackCd: 0.55,
+      screamCd: 2 + Math.random() * 4,
+      attackT: 0,
+      targetId,
+    });
+    this.lastMonsters = this.time;
+  }
+
+  /** Adds locally on the host, or asks the host to add it beside this player. */
+  private summonChallengeHorror(kind: MonsterKind, angle: number): Vec | null {
+    const pos = this.findChallengeSpawn(angle);
+    if (!pos) return null;
+    if (this.isHost) {
+      this.addChallengeMonster(kind, pos.x, pos.y, this.playerId);
+      this.sendMonsters();
+    } else {
+      this.sendFn?.('summon', { kind, x: round2(pos.x), y: round2(pos.y) });
+    }
+    return pos;
+  }
 
   private spawnMonsters(): void {
     if (!this.isHost) return;
@@ -1321,6 +1424,7 @@ export class Game {
     this.updateParticles(dt);
     this.updateAtmosphere(dt);
     this.updateScares(dt);
+    this.updateDarkDrain(dt);
 
     // Dread rises near unseen things and in the dark.
     let nearest = 40;
@@ -1520,10 +1624,7 @@ export class Game {
     }
     this.jumpScareCd = Math.max(0, this.jumpScareCd - dt);
 
-    if (this.whisperText) {
-      this.whisperText.t += dt;
-      if (this.whisperText.t >= this.whisperText.life) this.whisperText = null;
-    }
+    if (this.challenge) this.updateChallenge(dt);
 
     if (this.player.dead || this.ended || this.deathScene || this.descendTimer > 0) return;
 
@@ -1561,23 +1662,18 @@ export class Game {
       }
     }
 
-    // Words in the dust, only when the mind is already primed.
+    // Words in the dust, only when the mind is already primed. The old
+    // atmospheric whispers now carry rules the player has to obey.
     this.whisperClock -= dt;
-    if (!this.jumpScare && this.whisperClock <= 0) {
-      this.whisperClock = 44 + Math.random() * 40;
-      if (this.player.dread > 30 || this.time > 65) {
-        const phrases = [
-          "DON'T LOOK BACK",
-          'IT KNOWS YOUR NAME',
-          'YOU ARE NOT ALONE',
-          'THE DARK IS BREATHING',
-        ];
-        this.whisperText = {
-          text: phrases[Math.floor(Math.random() * phrases.length)]!,
-          t: 0,
-          life: 2.6,
-        };
-        this.audio.whisper();
+    if (!this.jumpScare && !this.challenge && this.whisperClock <= 0) {
+      if (this.player.dread > 20 || this.time > 26) {
+        const kinds: ChallengeKind[] = ['lookBack', 'keepMoving'];
+        if (this.player.flashlight && this.player.battery > 0) kinds.push('darkness');
+        const choices = kinds.filter((kind) => kind !== this.lastChallenge);
+        const kind = choices[Math.floor(Math.random() * choices.length)] ?? kinds[0]!;
+        this.startChallenge(kind);
+      } else {
+        this.whisperClock = 8 + Math.random() * 8;
       }
     }
 
@@ -1589,6 +1685,156 @@ export class Game {
       this.unseenClock = 24 + Math.random() * 24;
       this.unseenCd = 22 + Math.random() * 20;
       this.playUnseenScare();
+    }
+  }
+
+  private startChallenge(kind: ChallengeKind): void {
+    if (this.challenge || this.player.dead || this.ended || this.deathScene) return;
+    const defs: Record<
+      ChallengeKind,
+      { text: string; hint: string; duration: number; grace: number }
+    > = {
+      lookBack: {
+        text: "DON'T LOOK BACK",
+        hint: 'KEEP FACING FORWARD',
+        duration: 5,
+        grace: 0.25,
+      },
+      darkness: {
+        text: 'THE DARK IS BREATHING',
+        hint: 'KILL YOUR LIGHT',
+        duration: 11,
+        grace: 1,
+      },
+      keepMoving: {
+        text: 'KEEP MOVING',
+        hint: "DON'T STOP",
+        duration: 6,
+        grace: 0.7,
+      },
+    };
+    const def = defs[kind];
+    this.challenge = {
+      kind,
+      text: def.text,
+      hint: def.hint,
+      t: 0,
+      duration: def.duration,
+      grace: def.grace,
+      facing: this.player.facing,
+      still: 0,
+    };
+    this.lastChallenge = kind;
+    this.whisperClock = 42 + Math.random() * 28;
+    if (kind === 'darkness') this.invulnUntil = this.time + def.grace;
+    this.audio.whisper();
+  }
+
+  private updateChallenge(dt: number): void {
+    const challenge = this.challenge;
+    if (!challenge) return;
+    if (this.player.dead || this.ended || this.deathScene) {
+      this.challenge = null;
+      return;
+    }
+
+    challenge.t += dt;
+
+    if (challenge.kind === 'lookBack') {
+      if (
+        challenge.t > challenge.grace &&
+        Math.abs(angleDiff(this.player.facing, challenge.facing)) > 2.3
+      ) {
+        this.failChallenge('lookBack');
+        return;
+      }
+      if (challenge.t >= challenge.duration) this.completeChallenge();
+      return;
+    }
+
+    if (challenge.kind === 'darkness') {
+      if (challenge.t >= challenge.grace && !this.player.flashlight) {
+        this.completeChallenge();
+        return;
+      }
+      if (challenge.t >= challenge.duration) this.failChallenge('darkness');
+      return;
+    }
+
+    const moving =
+      this.keys.has('w') ||
+      this.keys.has('a') ||
+      this.keys.has('s') ||
+      this.keys.has('d') ||
+      this.keys.has('arrowup') ||
+      this.keys.has('arrowdown') ||
+      this.keys.has('arrowleft') ||
+      this.keys.has('arrowright');
+    if (challenge.t > challenge.grace) {
+      challenge.still = moving ? 0 : challenge.still + dt;
+      if (challenge.still >= 1.2) {
+        this.failChallenge('keepMoving');
+        return;
+      }
+    }
+    if (challenge.t >= challenge.duration) this.completeChallenge();
+  }
+
+  private completeChallenge(): void {
+    const challenge = this.challenge;
+    if (!challenge) return;
+    this.challenge = null;
+    this.invulnUntil = 0;
+    const message =
+      challenge.kind === 'lookBack'
+        ? 'You kept your eyes forward. It lost interest.'
+        : challenge.kind === 'darkness'
+          ? 'The dark settles. It loses your shape.'
+          : "It couldn't match your rhythm.";
+    this.hooks.toast(message, 'info');
+  }
+
+  private failChallenge(kind: ChallengeKind): void {
+    const challenge = this.challenge;
+    if (!challenge || challenge.kind !== kind) return;
+    this.challenge = null;
+    this.invulnUntil = 0;
+
+    const monsterKind: MonsterKind =
+      kind === 'keepMoving'
+        ? 'crawler'
+        : this.floor >= 2 && Math.random() < 0.5
+          ? 'wailer'
+          : 'stalker';
+    const behind = this.player.facing + Math.PI + (Math.random() - 0.5) * 0.9;
+    const pos = this.summonChallengeHorror(monsterKind, behind);
+    const sourceX = pos?.x ?? this.player.x + Math.cos(behind) * 4;
+    const sourceY = pos?.y ?? this.player.y + Math.sin(behind) * 4;
+
+    this.triggerJumpScare(monsterKind, 'monster', 0.95, 0, true);
+    if (kind === 'lookBack') {
+      this.damagePlayer(50, sourceX, sourceY);
+      this.hooks.toast("DON'T LOOK BACK — it was already behind you.", 'blood');
+    } else if (kind === 'darkness') {
+      this.darkDrain = 4.2;
+      this.darkDrainTick = 0;
+      this.darkSourceX = sourceX;
+      this.darkSourceY = sourceY;
+      this.hooks.toast('THE DARK HAS YOU — it is drinking the light.', 'blood');
+    } else {
+      this.damagePlayer(25, sourceX, sourceY);
+      this.hooks.toast('KEEP MOVING — it caught your scent.', 'blood');
+    }
+  }
+
+  private updateDarkDrain(dt: number): void {
+    if (this.darkDrain <= 0 || this.player.dead || this.ended) return;
+    this.darkDrain = Math.max(0, this.darkDrain - dt);
+    if (this.darkDrain <= 0) return;
+    this.darkDrainTick -= dt;
+    if (this.darkDrainTick <= 0) {
+      this.darkDrainTick = 0.32;
+      this.damagePlayer(4, this.darkSourceX, this.darkSourceY);
     }
   }
 
@@ -1629,7 +1875,6 @@ export class Game {
       source,
     };
     this.jumpScareCd = 24 + Math.random() * 16;
-    this.whisperText = null;
     this.shake = Math.max(this.shake, this.reducedFx ? 0.25 : 1.05);
     this.audio.jumpScare(kind, source, pan);
     this.audio.humanScream('panic', 0, 0.72);
@@ -1802,7 +2047,8 @@ export class Game {
     if (this.ended) return;
     this.ended = true;
     this.jumpScare = null;
-    this.whisperText = null;
+    this.challenge = null;
+    this.darkDrain = 0;
     this.audio.setStalk(0, 0, 'stalker');
     this.endedCause = cause;
     if (!this.player.dead) {
@@ -3796,6 +4042,22 @@ export class Game {
       ctx.fillRect(0, 0, w, h);
     }
 
+    if (this.darkDrain > 0 && !this.player.dead) {
+      const pulse = 0.07 + Math.max(0, Math.sin(this.time * 18)) * 0.07;
+      const edge = ctx.createRadialGradient(
+        w / 2,
+        h / 2,
+        Math.min(w, h) * 0.24,
+        w / 2,
+        h / 2,
+        Math.max(w, h) * 0.72
+      );
+      edge.addColorStop(0, 'rgba(90, 5, 8, 0)');
+      edge.addColorStop(1, `rgba(100, 4, 8, ${pulse})`);
+      ctx.fillStyle = edge;
+      ctx.fillRect(0, 0, w, h);
+    }
+
     // Blood on the lens after a bad hit or at death's door.
     const lensAlpha = lowHp ? 0.16 + Math.sin(this.time * 2.4) * 0.04 : this.flashTimer > 0 ? 0.14 : 0;
     if (lensAlpha > 0) {
@@ -3913,19 +4175,40 @@ export class Game {
       }
     }
 
-    if (this.whisperText) {
-      const p = Math.min(1, this.whisperText.t / this.whisperText.life);
-      const alpha = Math.sin(p * Math.PI) * (this.reducedFx ? 0.2 : 0.38);
+    if (this.challenge && !this.player.dead && !this.ended) {
+      const challenge = this.challenge;
+      const fadeIn = clamp(challenge.t / 0.25, 0, 1);
+      const fadeOut = clamp((challenge.duration - challenge.t) / 0.3, 0, 1);
+      const alpha = (this.reducedFx ? 0.58 : 0.82) * Math.min(fadeIn, fadeOut);
       if (alpha > 0.01) {
+        const jitter = this.reducedFx ? 0 : (Math.random() - 0.5) * 1.2;
+        const size = Math.max(16, Math.min(30, w * 0.045));
+        const hint = challenge.kind === 'darkness' && challenge.t < challenge.grace
+          ? 'THE DARK HOLDS STILL'
+          : challenge.hint;
+        const remaining = Math.max(0, challenge.duration - challenge.t);
+        const barW = Math.min(230, w * 0.56);
+        const barY = h * 0.15 + size * 1.35 + 18;
+
         ctx.save();
-        ctx.font = `${Math.max(14, Math.min(28, w * 0.035))}px Georgia, 'Times New Roman', serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const jitter = this.reducedFx ? 0 : (Math.random() - 0.5) * 1.4;
-        ctx.fillStyle = `rgba(222, 210, 190, ${alpha})`;
-        ctx.shadowColor = 'rgba(104, 18, 12, 0.8)';
+        ctx.font = `700 ${size}px Georgia, 'Times New Roman', serif`;
+        ctx.fillStyle = `rgba(232, 216, 194, ${alpha})`;
+        ctx.shadowColor = 'rgba(104, 18, 12, 0.85)';
         ctx.shadowBlur = 18;
-        ctx.fillText(this.whisperText.text, w / 2 + jitter, h * 0.16);
+        ctx.fillText(challenge.text, w / 2 + jitter, h * 0.15);
+
+        ctx.font = `${Math.max(11, Math.min(16, w * 0.02))}px Georgia, 'Times New Roman', serif`;
+        ctx.fillStyle = `rgba(205, 186, 160, ${alpha * 0.9})`;
+        ctx.shadowBlur = 8;
+        ctx.fillText(`${hint} · ${remaining.toFixed(1)}s`, w / 2, h * 0.15 + size * 1.35);
+
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = 'rgba(10, 8, 7, 0.62)';
+        ctx.fillRect(w / 2 - barW / 2, barY, barW, 2);
+        ctx.fillStyle = `rgba(168, 48, 34, ${alpha})`;
+        ctx.fillRect(w / 2 - barW / 2, barY, barW * clamp(remaining / challenge.duration, 0, 1), 2);
         ctx.restore();
       }
     }
