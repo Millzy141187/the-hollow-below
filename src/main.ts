@@ -778,6 +778,10 @@ function applyHud(state: HudState): void {
     ? 'WASD move · Shift sprint · Mouse aim · LMB strike · F light · E use · Esc pause'
     : 'WASD move · Shift sprint · Mouse aim · LMB strike · F light off · E use · Esc pause';
 
+  // Let the caught scene play as a clean cinematic; the HUD returns if a
+  // multiplayer session moves on to spectating.
+  hud.classList.toggle('hidden', state.dead && !state.spectating);
+
   paintNetStatus();
 }
 

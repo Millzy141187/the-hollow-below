@@ -20,6 +20,7 @@ import {
   type Vec,
 } from './dungeon';
 import { angleDiff, clamp, hash2, lerp, mulberry32 } from './rng';
+import { drawCaughtCutscene, type CaughtScene } from './cinematic';
 
 const TILE = 40;
 const BODY_RADIUS = 0.3;
@@ -164,6 +165,7 @@ export class Game {
   private ended = false;
   private endedCause = '';
   private deadAt = 0;
+  private deathScene: CaughtScene | null = null;
   private raf = 0;
   private lastFrame = 0;
   private startedAt = 0;
@@ -468,6 +470,7 @@ export class Game {
           phase: Math.random() * 7,
           attackCd: 1,
           screamCd: 2,
+          attackT: 0,
           targetId: null,
         };
         this.monsters.set(id, monster);
@@ -479,6 +482,7 @@ export class Game {
       if (hp < monster.hp) monster.flash = 0.14;
       monster.hp = clamp(hp, 0, maxHp);
       monster.hunt = raw[6] === 1;
+      if (raw.length > 7) monster.attackT = Math.max(monster.attackT, clamp(num(raw[7], 0), 0, 0.32));
       seen.add(id);
     }
     for (const id of [...this.monsters.keys()]) {
@@ -721,6 +725,15 @@ export class Game {
     this.player.flashlight = false;
     this.player.attackT = 0;
     this.deadAt = this.time;
+    const killer = this.killerKind();
+    this.deathScene = {
+      t: 0,
+      duration: 5.2,
+      kind: killer,
+      seed: (Math.random() * 0xffffffff) >>> 0,
+      playerName: this.name,
+    };
+    this.shake = 1.2;
     this.spawnBlood(this.player.x, this.player.y, 3);
     this.splats.push({
       x: this.player.x,
@@ -729,10 +742,23 @@ export class Game {
       rot: Math.random() * Math.PI,
       alpha: 0.6,
     });
-    this.audio.death();
+    this.audio.caught(killer);
     this.hooks.presence({ dead: true, hp: 0 });
     this.hooks.toast('You died in the dark.', 'blood');
     this.lastState = -1;
+  }
+
+  private killerKind(): MonsterKind {
+    let best: MonsterKind = 'stalker';
+    let bestDist = Infinity;
+    for (const monster of this.monsters.values()) {
+      const dist = Math.hypot(monster.x - this.player.x, monster.y - this.player.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = monster.kind;
+      }
+    }
+    return best;
   }
 
   private hurtTarget(targetId: string, amount: number, x: number, y: number): void {
@@ -893,6 +919,7 @@ export class Game {
         phase: rand() * Math.PI * 2,
         attackCd: 1 + rand(),
         screamCd: 3 + rand() * 5,
+        attackT: 0,
         targetId: null,
       });
     }
@@ -906,6 +933,7 @@ export class Game {
         monster.y = lerp(monster.y, monster.ty, Math.min(1, dt * 10));
         monster.phase += dt * (monster.hunt ? 4.5 : 1.4);
         monster.flash = Math.max(0, monster.flash - dt);
+        monster.attackT = Math.max(0, monster.attackT - dt);
       }
       return;
     }
@@ -928,6 +956,7 @@ export class Game {
       monster.flash = Math.max(0, monster.flash - dt);
       monster.attackCd -= dt;
       monster.screamCd -= dt;
+      monster.attackT = Math.max(0, monster.attackT - dt);
       const stats = monsterStats(monster.kind, this.floor);
 
       let target: Target | null = null;
@@ -996,6 +1025,7 @@ export class Game {
 
         if (dist < 1.0 && monster.attackCd <= 0) {
           monster.attackCd = stats.attackCd;
+          monster.attackT = 0.32;
           this.hurtTarget(target.id, Math.round(stats.damage), monster.x, monster.y);
           this.shake = Math.min(1, this.shake + 0.08);
         }
@@ -1035,6 +1065,7 @@ export class Game {
       Math.max(0, Math.round(m.hp)),
       Math.round(m.maxHp),
       m.hunt ? 1 : 0,
+      round2(m.attackT),
     ]);
     this.sendFn('ms', { m: list });
   }
@@ -1063,6 +1094,10 @@ export class Game {
 
   private update(dt: number): void {
     const p = this.player;
+    if (this.deathScene) {
+      this.deathScene.t += dt;
+      if (this.deathScene.t >= this.deathScene.duration) this.deathScene = null;
+    }
     p.attackCd = Math.max(0, p.attackCd - dt);
     p.attackT = Math.max(0, p.attackT - dt);
     this.flashTimer = Math.max(0, this.flashTimer - dt);
@@ -1224,14 +1259,14 @@ export class Game {
 
     if (p.dead && !this.ended) {
       if (!this.multiplayer) {
-        if (this.time - this.deadAt > 1.8) this.endRun('The dark took you.');
+        if (this.time - this.deadAt > 5.5) this.endRun('The dark took you.');
       } else {
         const others = this.peers.filter((peer) => peer.id !== this.playerId);
         const known = others.filter((peer) => this.remote.has(peer.id));
         const allDead =
           others.length === 0 ||
           (known.length === others.length && known.every((peer) => this.remote.get(peer.id)?.dead));
-        if (allDead && this.time - this.deadAt > 2.2) this.endRun('Your whole party is gone.');
+        if (allDead && this.time - this.deadAt > 5.7) this.endRun('Your whole party is gone.');
       }
     }
   }
@@ -1315,7 +1350,7 @@ export class Game {
       flashlight: this.player.flashlight,
       descending: this.descendTimer,
       party,
-      spectating: this.player.dead && this.multiplayer,
+      spectating: this.player.dead && this.multiplayer && !this.deathScene,
     };
   }
 
@@ -1528,6 +1563,9 @@ export class Game {
 
     this.renderLighting(ctx, camX, camY, view);
     this.renderScreenEffects(ctx, w, h);
+    if (this.deathScene) {
+      drawCaughtCutscene(ctx, w, h, this.deathScene, this.reducedFx);
+    }
   }
 
   private drawTiles(ctx: CanvasRenderingContext2D, camX: number, camY: number, w: number, h: number): void {
@@ -1536,6 +1574,8 @@ export class Game {
     const startY = Math.max(0, Math.floor(camY / TILE) - 1);
     const endX = Math.min(d.w - 1, Math.floor((camX + w) / TILE) + 1);
     const endY = Math.min(d.h - 1, Math.floor((camY + h) / TILE) + 1);
+    const isWall = (tx: number, ty: number): boolean =>
+      tx < 0 || ty < 0 || tx >= d.w || ty >= d.h || d.tiles[ty * d.w + tx] === WALL;
 
     for (let ty = startY; ty <= endY; ty++) {
       for (let tx = startX; tx <= endX; tx++) {
@@ -1544,52 +1584,122 @@ export class Game {
         const visible = this.visible.has(index);
         if (!explored && !visible) continue;
         const tile = d.tiles[index];
-        const noise = (hash2(tx * 13 + this.floor * 71, ty * 17 + this.baseSeed) & 255) / 255;
+        const n1 = (hash2(tx * 13 + this.floor * 71, ty * 17 + this.baseSeed) & 255) / 255;
+        const n2 = (hash2(tx * 31 + this.floor * 19, ty * 7 + this.baseSeed + 91) & 255) / 255;
         const px = tx * TILE;
         const py = ty * TILE;
-        ctx.globalAlpha = visible ? 1 : 0.26;
+        ctx.globalAlpha = visible ? 1 : 0.24;
 
         if (tile === WALL) {
-          ctx.fillStyle = '#090808';
+          // Damp, stacked masonry instead of a flat square.
+          ctx.fillStyle = '#080706';
           ctx.fillRect(px, py, TILE + 1, TILE + 1);
-          ctx.fillStyle = `hsl(26 11% ${17 + noise * 7}%)`;
-          ctx.fillRect(px + 2, py + 2, TILE - 4, TILE - 4);
-          ctx.fillStyle = `hsla(34 16% ${30 + noise * 10}% / 0.8)`;
-          ctx.fillRect(px + 2, py + 2, TILE - 4, 3);
-          ctx.fillStyle = 'rgba(0,0,0,0.36)';
-          ctx.fillRect(px + 2, py + TILE - 5, TILE - 4, 3);
-          if (noise > 0.72) {
-            ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+          const rowH = TILE / 3;
+          for (let row = 0; row < 3; row++) {
+            const offset = (row % 2 ? 9 : 0) + (n2 > 0.55 ? 3 : 0);
+            const y = py + row * rowH;
+            for (let block = -1; block < 3; block++) {
+              const x = px + block * 19 + offset;
+              const bn = (hash2(
+                tx * 41 + block * 13 + row * 5,
+                ty * 29 + row * 17 + this.baseSeed
+              ) & 255) / 255;
+              const blockW = 18;
+              const blockH = rowH - 2;
+              ctx.fillStyle = `hsl(${24 + bn * 9} ${9 + n1 * 7}% ${14 + bn * 9}%)`;
+              ctx.fillRect(x + 1, y + 1, blockW - 1, blockH - 1);
+              ctx.fillStyle = `rgba(224, 205, 174, ${0.035 + bn * 0.05})`;
+              ctx.fillRect(x + 1, y + 1, blockW - 1, 1);
+              ctx.fillStyle = 'rgba(0,0,0,0.34)';
+              ctx.fillRect(x + 1, y + blockH - 2, blockW - 1, 2);
+              if (bn > 0.78) {
+                ctx.strokeStyle = 'rgba(0,0,0,0.38)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x + 4, y + 3);
+                ctx.lineTo(x + 9, y + blockH * 0.55);
+                ctx.lineTo(x + 6, y + blockH - 3);
+                ctx.stroke();
+              }
+            }
+          }
+          if (n1 > 0.52) {
+            ctx.fillStyle = `rgba(44, 56, 38, ${0.08 + n2 * 0.1})`;
+            ctx.fillRect(px + 2, py + TILE - 9, TILE - 4, 7);
+          }
+          ctx.fillStyle = 'rgba(0,0,0,0.34)';
+          ctx.fillRect(px, py + TILE - 2, TILE, 2);
+        } else {
+          // Uneven flagstones, grout, wall shadows and old stains.
+          ctx.fillStyle = `hsl(28 11% ${12 + n1 * 4}%)`;
+          ctx.fillRect(px, py, TILE + 1, TILE + 1);
+          for (let sy = 0; sy < 2; sy++) {
+            for (let sx = 0; sx < 2; sx++) {
+              const bn = (hash2(
+                tx * 53 + sx * 17,
+                ty * 37 + sy * 19 + this.baseSeed
+              ) & 255) / 255;
+              const inset = 1 + (bn > 0.5 ? 1 : 0);
+              const x = px + sx * 20 + inset;
+              const y = py + sy * 20 + inset;
+              const sw = 20 - inset * 2 - (bn > 0.7 ? 1 : 0);
+              const sh = 20 - inset * 2;
+              ctx.fillStyle = `hsl(${26 + bn * 7} ${8 + n1 * 6}% ${14 + bn * 5}%)`;
+              ctx.fillRect(x, y, sw, sh);
+              ctx.fillStyle = `rgba(216, 196, 165, ${0.018 + bn * 0.025})`;
+              ctx.fillRect(x, y, sw, 1);
+              ctx.fillStyle = 'rgba(0,0,0,0.26)';
+              ctx.fillRect(x, y + sh - 1, sw, 1);
+              if (bn < 0.16) {
+                ctx.fillStyle = 'rgba(9, 8, 7, 0.4)';
+                ctx.fillRect(x + 4, y + 6, 7, 3);
+              }
+            }
+          }
+          ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(px + 20.5, py + 1);
+          ctx.lineTo(px + 20.5, py + TILE - 1);
+          ctx.moveTo(px + 1, py + 20.5);
+          ctx.lineTo(px + TILE - 1, py + 20.5);
+          ctx.stroke();
+          ctx.fillStyle = 'rgba(0,0,0,0.24)';
+          if (isWall(tx, ty - 1)) ctx.fillRect(px, py, TILE, 7);
+          if (isWall(tx, ty + 1)) ctx.fillRect(px, py + TILE - 7, TILE, 7);
+          if (isWall(tx - 1, ty)) ctx.fillRect(px, py, 7, TILE);
+          if (isWall(tx + 1, ty)) ctx.fillRect(px + TILE - 7, py, 7, TILE);
+          ctx.fillStyle = 'rgba(0,0,0,0.16)';
+          if (isWall(tx, ty - 1)) ctx.fillRect(px, py + 7, TILE, 5);
+          if (isWall(tx - 1, ty)) ctx.fillRect(px + 7, py, 5, TILE);
+          if (n2 > 0.74) {
+            ctx.strokeStyle = 'rgba(9, 7, 6, 0.42)';
             ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(px + 9 + noise * 8, py + 9);
-            ctx.lineTo(px + 15 + noise * 5, py + 23);
-            ctx.lineTo(px + 11 + noise * 4, py + 31);
+            ctx.moveTo(px + 7 + n1 * 15, py + 4);
+            ctx.lineTo(px + 13 + n2 * 12, py + 17);
+            ctx.lineTo(px + 9 + n1 * 8, py + 30);
+            ctx.lineTo(px + 15 + n2 * 10, py + 36);
             ctx.stroke();
           }
-          if (noise < 0.16) {
-            ctx.fillStyle = 'rgba(84, 70, 52, 0.24)';
-            ctx.fillRect(px + 6, py + 10, 3, 24);
-          }
-        } else {
-          ctx.fillStyle = `hsl(29 10% ${15 + noise * 5}%)`;
-          ctx.fillRect(px, py, TILE + 1, TILE + 1);
-          ctx.strokeStyle = 'rgba(0,0,0,0.22)';
-          ctx.lineWidth = 1;
-          ctx.strokeRect(px + 0.5, py + 0.5, TILE, TILE);
-          if (noise > 0.84) {
-            ctx.strokeStyle = 'rgba(53, 44, 36, 0.5)';
+          if (n1 > 0.87) {
+            ctx.fillStyle = 'rgba(91, 44, 34, 0.18)';
             ctx.beginPath();
-            ctx.moveTo(px + 7, py + 9);
-            ctx.lineTo(px + 26, py + 30);
-            ctx.stroke();
-          } else if (noise < 0.1) {
-            ctx.fillStyle = 'rgba(30, 25, 21, 0.6)';
-            ctx.fillRect(px + 12, py + 20, 10, 6);
+            ctx.ellipse(
+              px + 10 + n2 * 20,
+              py + 11 + n1 * 14,
+              5 + n2 * 4,
+              2 + n1 * 2,
+              n2 * 2,
+              0,
+              Math.PI * 2
+            );
+            ctx.fill();
           }
-          if (visible) {
-            ctx.fillStyle = 'rgba(210, 170, 110, 0.035)';
-            ctx.fillRect(px, py, TILE, TILE);
+          if (n2 < 0.12) {
+            ctx.fillStyle = 'rgba(118, 98, 74, 0.28)';
+            ctx.fillRect(px + 8, py + 26, 2, 1);
+            ctx.fillRect(px + 11, py + 24, 1, 3);
           }
         }
       }
@@ -1603,13 +1713,35 @@ export class Game {
       ctx.save();
       ctx.translate(splat.x * TILE, splat.y * TILE);
       ctx.rotate(splat.rot);
-      ctx.fillStyle = `rgba(74, 16, 13, ${splat.alpha})`;
+      ctx.fillStyle = `rgba(46, 8, 7, ${splat.alpha * 0.94})`;
       ctx.beginPath();
-      ctx.ellipse(0, 0, splat.r * TILE, splat.r * TILE * 0.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, splat.r * TILE, splat.r * TILE * 0.52, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = `rgba(103, 24, 18, ${splat.alpha * 0.7})`;
+      ctx.fillStyle = `rgba(112, 25, 18, ${splat.alpha * 0.52})`;
       ctx.beginPath();
-      ctx.ellipse(splat.r * 20, splat.r * 9, splat.r * 8, splat.r * 4, 0.4, 0, Math.PI * 2);
+      ctx.ellipse(splat.r * 8, splat.r * 5, splat.r * TILE * 0.62, splat.r * TILE * 0.3, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      const droplets = 3 + Math.floor(splat.r * 10);
+      for (let i = 0; i < droplets; i++) {
+        const angle = splat.rot * 2.3 + i * 2.1;
+        const dist = splat.r * TILE * (0.65 + ((i * 37) % 10) / 18);
+        const size = 1 + ((i * 13) % 5) * 0.8 * splat.r;
+        ctx.fillStyle = `rgba(60, 10, 8, ${splat.alpha * 0.7})`;
+        ctx.beginPath();
+        ctx.ellipse(
+          Math.cos(angle) * dist,
+          Math.sin(angle) * dist * 0.55,
+          size,
+          size * 0.55,
+          angle,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+      ctx.fillStyle = `rgba(205, 130, 112, ${splat.alpha * 0.13})`;
+      ctx.beginPath();
+      ctx.ellipse(-splat.r * 8, -splat.r * 5, splat.r * 9, splat.r * 3, 0.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -1776,23 +1908,106 @@ export class Game {
   private drawCorpse(ctx: CanvasRenderingContext2D, x: number, y: number): void {
     ctx.save();
     ctx.translate(x * TILE, y * TILE);
+    const shadow = ctx.createRadialGradient(0, 5, 1, 0, 5, 25);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.58)');
+    shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 25, 11, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(45, 8, 7, 0.68)';
+    ctx.beginPath();
+    ctx.ellipse(4, 5, 24, 14, 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(103, 22, 16, 0.36)';
+    ctx.beginPath();
+    ctx.ellipse(10, 5, 15, 8, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
     ctx.rotate(Math.PI / 2.6);
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.lineCap = 'round';
+    // Sprawled legs.
+    ctx.strokeStyle = '#19130f';
+    ctx.lineWidth = 4.5;
     ctx.beginPath();
-    ctx.ellipse(0, 3, 15, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(64, 20, 17, 0.6)';
+    ctx.moveTo(-4, 5);
+    ctx.lineTo(-10, 13);
+    ctx.lineTo(-18, 16);
+    ctx.moveTo(4, 5);
+    ctx.lineTo(10, 14);
+    ctx.lineTo(17, 11);
+    ctx.stroke();
+    ctx.strokeStyle = '#0d0b09';
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 17, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2e2924';
+    ctx.moveTo(-18, 16);
+    ctx.lineTo(-22, 15);
+    ctx.moveTo(17, 11);
+    ctx.lineTo(21, 9);
+    ctx.stroke();
+
+    // Ruined coat and chest.
+    ctx.fillStyle = '#2c241e';
     ctx.beginPath();
-    ctx.ellipse(3, -2, 11, 6, 0.4, 0, Math.PI * 2);
+    ctx.ellipse(1, 0, 12, 7, 0.3, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#43372d';
+    ctx.beginPath();
+    ctx.ellipse(3, -2, 9, 5, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(157, 137, 109, 0.25)';
+    ctx.lineWidth = 1;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * 3, -5);
+      ctx.lineTo(i * 3 + 2, 2);
+      ctx.stroke();
+    }
+
+    // Arms reaching the wrong way.
+    ctx.strokeStyle = '#241c17';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(-7, -3);
+    ctx.lineTo(-15, -8);
+    ctx.lineTo(-19, -4);
+    ctx.moveTo(7, 3);
+    ctx.lineTo(14, 8);
+    ctx.lineTo(18, 4);
+    ctx.stroke();
+    ctx.fillStyle = '#a2927d';
+    ctx.beginPath();
+    ctx.ellipse(-19, -4, 2.4, 1.6, 0.4, 0, Math.PI * 2);
+    ctx.ellipse(18, 4, 2.4, 1.6, -0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Head, hair and a little exposed bone.
     ctx.fillStyle = '#8e8578';
     ctx.beginPath();
-    ctx.arc(12, -6, 4.5, 0, Math.PI * 2);
+    ctx.arc(12, -6, 5, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = '#241c16';
+    ctx.beginPath();
+    ctx.arc(13, -7, 5.1, Math.PI * 0.85, Math.PI * 2.1);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(22, 16, 13, 0.75)';
+    ctx.beginPath();
+    ctx.ellipse(14, -4, 2.2, 1.2, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#c9bda8';
+    ctx.fillRect(15, -10, 2, 5);
+    ctx.fillStyle = '#7d2019';
+    ctx.fillRect(15, -10, 2, 1);
+
+    // Wet blood streaks.
+    ctx.strokeStyle = 'rgba(109, 25, 18, 0.55)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(7, 5);
+    ctx.lineTo(13, 12);
+    ctx.moveTo(-2, 6);
+    ctx.lineTo(-7, 13);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -1811,80 +2026,155 @@ export class Game {
       this.drawCorpse(ctx, x, y);
       return;
     }
-    ctx.save();
-    ctx.translate(x * TILE, y * TILE);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-    ctx.beginPath();
-    ctx.ellipse(0, 5, 14, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
+    const px = x * TILE;
+    const py = y * TILE;
+    const bob = Math.sin(this.time * 2.1 + x * 2.7) * 0.55;
+    const stride = walk * 4;
+    const attackProgress = attack > 0 ? 1 - attack / 0.2 : 0;
 
+    // Soft contact shadow.
+    ctx.save();
+    const shadow = ctx.createRadialGradient(px, py + 7, 1, px, py + 7, 23);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.56)');
+    shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shadow;
+    ctx.beginPath();
+    ctx.ellipse(px, py + 7, 23, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(px, py + bob);
     if (self) {
-      ctx.strokeStyle = 'rgba(210, 161, 95, 0.2)';
+      ctx.strokeStyle = 'rgba(210, 161, 95, 0.14)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.arc(0, 0, 19, 0, Math.PI * 2);
       ctx.stroke();
     }
-
     ctx.rotate(facing + Math.PI / 2);
-    const stride = walk * 4;
-
-    ctx.strokeStyle = '#171310';
-    ctx.lineWidth = 4;
+    ctx.scale(1.12, 1.12);
     ctx.lineCap = 'round';
+
+    // Legs and boots.
+    ctx.strokeStyle = '#15100d';
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(-4, 2);
-    ctx.lineTo(-4 + stride * 0.4, 10);
-    ctx.moveTo(4, 2);
-    ctx.lineTo(4 - stride * 0.4, 10);
+    ctx.moveTo(-4, 5);
+    ctx.lineTo(-4 + stride * 0.32, 11);
+    ctx.lineTo(-5 - stride * 0.42, 17);
+    ctx.moveTo(4, 5);
+    ctx.lineTo(4 - stride * 0.32, 11);
+    ctx.lineTo(5 + stride * 0.42, 17);
+    ctx.stroke();
+    ctx.strokeStyle = '#0d0b09';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-5 - stride * 0.42, 17);
+    ctx.lineTo(-8 - stride * 0.3, 18);
+    ctx.moveTo(5 + stride * 0.42, 17);
+    ctx.lineTo(8 + stride * 0.3, 18);
     ctx.stroke();
 
-    ctx.fillStyle = '#171310';
+    // Long coat, with a wet-looking falloff into the dark.
+    const coat = ctx.createLinearGradient(0, -13, 0, 12);
+    coat.addColorStop(0, color);
+    coat.addColorStop(0.62, color);
+    coat.addColorStop(1, 'rgba(18, 14, 12, 0.96)');
+    ctx.fillStyle = coat;
     ctx.beginPath();
-    ctx.ellipse(0, 0, 9.5, 13, 0, 0, Math.PI * 2);
+    ctx.moveTo(-8, -8);
+    ctx.quadraticCurveTo(-11, 0, -7, 10);
+    ctx.lineTo(7, 10);
+    ctx.quadraticCurveTo(11, 0, 8, -8);
+    ctx.quadraticCurveTo(0, -13, -8, -8);
+    ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = color;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.26)';
     ctx.beginPath();
-    ctx.ellipse(0, -1, 8.6, 11, 0, 0, Math.PI * 2);
+    ctx.ellipse(-3, 2, 4.5, 8, 0.15, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.strokeStyle = 'rgba(255, 240, 215, 0.12)';
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.ellipse(0, 2.5, 6.8, 7.5, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = '#211c17';
-    ctx.lineWidth = 3.5;
+    ctx.moveTo(-6, -7);
+    ctx.quadraticCurveTo(-9, 0, -6, 7);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(16, 12, 10, 0.9)';
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(-7, -3);
-    ctx.lineTo(-10 + stride * 0.5, 5);
-    ctx.moveTo(7, -3);
-    ctx.lineTo(10 - stride * 0.5, 5);
+    ctx.moveTo(-7, 3);
+    ctx.lineTo(7, 3);
     ctx.stroke();
 
-    ctx.fillStyle = '#c9bca7';
+    // Arms; one holds the flashlight, the other a length of pipe.
+    ctx.strokeStyle = '#211a15';
+    ctx.lineWidth = 4;
     ctx.beginPath();
-    ctx.arc(0, -10, 5.4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#29221c';
+    ctx.moveTo(-7, -5);
+    ctx.quadraticCurveTo(-11, -1, -9, 4);
+    ctx.moveTo(7, -5);
+    ctx.quadraticCurveTo(11, -1, 9, 3);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(-9, 2);
+    ctx.rotate(-0.2);
+    ctx.fillStyle = '#2b2924';
+    ctx.fillRect(-1.5, -4, 3, 7);
+    ctx.fillStyle = '#d8b574';
+    ctx.fillRect(-1.5, -4, 3, 1.4);
+    ctx.restore();
+
+    // Head and hair.
+    ctx.fillStyle = '#c7b9a4';
     ctx.beginPath();
-    ctx.arc(0, -11.4, 5.4, Math.PI * 0.98, Math.PI * 2.02);
+    ctx.ellipse(0, -12, 5.2, 6, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = 'rgba(70, 54, 44, 0.38)';
+    ctx.beginPath();
+    ctx.ellipse(-1.5, -11, 2, 3.8, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#241c16';
+    ctx.beginPath();
+    ctx.arc(0, -13.5, 5.2, Math.PI * 0.95, Math.PI * 2.05);
+    ctx.fill();
+    ctx.fillStyle = '#9c8d7a';
+    ctx.fillRect(-1.8, -8, 3.6, 3);
+
+    const pipe = ctx.createLinearGradient(0, -18, 0, 0);
+    pipe.addColorStop(0, '#b1a693');
+    pipe.addColorStop(1, '#5f584e');
+    ctx.save();
+    ctx.translate(8.5, 1);
+    ctx.rotate(-0.5 + attackProgress * 1.7);
+    ctx.strokeStyle = pipe;
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, -18);
+    ctx.stroke();
+    ctx.restore();
 
     if (attack > 0) {
-      ctx.strokeStyle = 'rgba(222, 190, 138, 0.7)';
+      ctx.strokeStyle = `rgba(226, 190, 134, ${0.45 * (1 - attackProgress)})`;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(0, -14);
-      ctx.lineTo(7 - walk * 2, -22);
+      ctx.arc(0, 0, 20 + attackProgress * 10, -1.15 + attackProgress * 1.7, 0.25 + attackProgress * 1.7);
       ctx.stroke();
     }
     ctx.restore();
 
     if (self) {
-      ctx.fillStyle = 'rgba(210, 161, 95, 0.9)';
+      ctx.save();
+      const glow = ctx.createRadialGradient(px, py, 1, px, py, 16);
+      glow.addColorStop(0, 'rgba(210, 161, 95, 0.17)');
+      glow.addColorStop(1, 'rgba(210, 161, 95, 0)');
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(x * TILE, y * TILE - 3, 1.8, 0, Math.PI * 2);
+      ctx.arc(px, py, 16, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     }
   }
 
@@ -1893,127 +2183,262 @@ export class Game {
     const py = monster.y * TILE;
     const sway = Math.sin(monster.phase);
     const hunting = monster.hunt;
+    const view = this.getViewTarget();
+    let targetX = view.x;
+    let targetY = view.y;
+    if (monster.targetId && monster.targetId !== this.playerId) {
+      const remote = this.remote.get(monster.targetId);
+      if (remote) {
+        targetX = remote.x;
+        targetY = remote.y;
+      }
+    }
+    const facing = Math.atan2(targetY - monster.y, targetX - monster.x);
+    const lunge =
+      monster.attackT > 0 ? Math.sin((1 - monster.attackT / 0.32) * Math.PI) * 6 : 0;
+    const twitch = Math.sin(monster.phase * 2.7) * 0.022;
 
     ctx.save();
-    ctx.translate(px, py);
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    const shadow = ctx.createRadialGradient(px, py + 7, 1, px, py + 7, 31);
+    shadow.addColorStop(0, 'rgba(0, 0, 0, 0.62)');
+    shadow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shadow;
     ctx.beginPath();
-    ctx.ellipse(0, 6, 17, 7, 0, 0, Math.PI * 2);
+    ctx.ellipse(px, py + 7, 30, 12, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(px + Math.cos(facing) * lunge, py + Math.sin(facing) * lunge);
+    ctx.rotate(facing + Math.PI / 2 + twitch);
+    ctx.scale(1.1, 1.1);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
 
     if (monster.kind === 'crawler') {
-      ctx.strokeStyle = '#1a1512';
-      ctx.lineWidth = 2.6;
-      ctx.lineCap = 'round';
+      // Too many joints; skin pulled tight over a borrowed skeleton.
+      ctx.strokeStyle = '#1c1512';
+      ctx.lineWidth = 3.2;
       for (let i = 0; i < 4; i++) {
         const side = i < 2 ? -1 : 1;
-        const off = i % 2 === 0 ? -5 : 5;
+        const front = i % 2 === 0;
+        const shoulderY = front ? -4 : 8;
+        const elbowX = side * (13 + (front ? 1 : 3));
+        const elbowY = shoulderY + (front ? -5 : 6) + sway * (front ? 2.5 : -1.5);
+        const clawX = side * (20 + (front ? 2 : 0));
+        const clawY = shoulderY + (front ? -10 : 12) + sway * 2;
         ctx.beginPath();
-        ctx.moveTo(side * 6, off);
-        ctx.lineTo(side * 15, off + sway * 3 + (i % 2 === 0 ? -4 : 4));
+        ctx.moveTo(side * 7, shoulderY);
+        ctx.lineTo(elbowX, elbowY);
+        ctx.lineTo(clawX, clawY);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(169, 141, 112, 0.28)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(elbowX, elbowY);
+        ctx.lineTo(clawX + side * 3, clawY + (front ? -3 : 3));
+        ctx.stroke();
+        ctx.strokeStyle = '#1c1512';
+        ctx.lineWidth = 3.2;
+      }
+
+      const body = ctx.createRadialGradient(-5, -2, 2, 0, 4, 20);
+      body.addColorStop(0, '#514036');
+      body.addColorStop(0.55, '#2b211c');
+      body.addColorStop(1, '#120e0c');
+      ctx.fillStyle = body;
+      ctx.beginPath();
+      ctx.ellipse(0, 4, 14, 10, sway * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(185, 149, 113, 0.32)';
+      ctx.lineWidth = 1.2;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.ellipse(0, 3 + i * 2.8, 10 - Math.abs(i), 4, 0, Math.PI * 0.15, Math.PI * 0.85);
         ctx.stroke();
       }
-      ctx.fillStyle = '#231d19';
+      ctx.strokeStyle = 'rgba(212, 181, 146, 0.22)';
       ctx.beginPath();
-      ctx.ellipse(0, 0, 14, 10, sway * 0.12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#3a2e26';
+      ctx.moveTo(0, -7);
+      ctx.lineTo(0, 14);
+      ctx.stroke();
+
+      // Skull and split jaw.
+      const jaw = 1.5 + (hunting ? 2.5 : 0) + Math.abs(sway) * 1.2 + (monster.attackT > 0 ? 3 : 0);
+      ctx.fillStyle = '#382c24';
       ctx.beginPath();
-      ctx.ellipse(6, sway * 1.5, 7, 6, 0.2, 0, Math.PI * 2);
+      ctx.ellipse(0, -10, 8.5, 6.5, 0, 0, Math.PI * 2);
       ctx.fill();
-      const eyeGlow = hunting ? 0.9 : 0.55;
-      ctx.fillStyle = `rgba(214, 62, 42, ${eyeGlow})`;
-      ctx.shadowColor = 'rgba(214, 62, 42, 0.9)';
-      ctx.shadowBlur = hunting ? 9 : 4;
+      ctx.fillStyle = '#0a0807';
       ctx.beginPath();
-      ctx.arc(10, -2 + sway, 1.8, 0, Math.PI * 2);
-      ctx.arc(11, 3 + sway, 1.6, 0, Math.PI * 2);
+      ctx.ellipse(0, -7, 6, jaw, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.strokeStyle = 'rgba(140, 60, 45, 0.55)';
+      ctx.fillStyle = 'rgba(213, 196, 168, 0.85)';
+      for (let i = -3; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 1.8, -7 - jaw);
+        ctx.lineTo(i * 1.8, -7 - jaw + 2.4);
+        ctx.lineTo(i * 1.8 + 0.8, -7 - jaw);
+        ctx.fill();
+      }
+      ctx.strokeStyle = 'rgba(126, 27, 20, 0.62)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(12, 0);
-      ctx.lineTo(17, 3);
-      ctx.moveTo(12, 2);
-      ctx.lineTo(16, 6);
+      ctx.moveTo(-3, -4);
+      ctx.lineTo(-5, 4);
+      ctx.moveTo(2, -3);
+      ctx.lineTo(4, 5);
       ctx.stroke();
-    } else if (monster.kind === 'stalker') {
-      ctx.fillStyle = '#0f0d0c';
+
+      const eyeGlow = hunting ? 0.92 : 0.55;
+      ctx.save();
+      ctx.fillStyle = `rgba(222, 63, 40, ${eyeGlow})`;
+      ctx.shadowColor = 'rgba(232, 58, 36, 0.95)';
+      ctx.shadowBlur = hunting ? 11 : 5;
       ctx.beginPath();
-      ctx.moveTo(-8, 16);
-      ctx.quadraticCurveTo(-11, -6, -3, -18);
-      ctx.quadraticCurveTo(0, -21, 3, -18);
-      ctx.quadraticCurveTo(11, -6, 8, 16);
+      ctx.arc(-3.2, -11, 1.55, 0, Math.PI * 2);
+      ctx.arc(3.2, -11, 1.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (monster.kind === 'stalker') {
+      // A person that kept growing after it should have stopped.
+      const skin = ctx.createLinearGradient(-12, -22, 10, 18);
+      skin.addColorStop(0, '#2d241e');
+      skin.addColorStop(0.55, '#171210');
+      skin.addColorStop(1, '#090807');
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.moveTo(-9, 18);
+      ctx.quadraticCurveTo(-12, -2, -6, -16);
+      ctx.quadraticCurveTo(-3, -22, 0, -23);
+      ctx.quadraticCurveTo(3, -22, 6, -16);
+      ctx.quadraticCurveTo(12, -2, 9, 18);
+      ctx.lineTo(4, 13);
+      ctx.lineTo(1, 19);
+      ctx.lineTo(-4, 14);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#0b0a09';
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
+
+      ctx.strokeStyle = 'rgba(187, 163, 133, 0.22)';
+      ctx.lineWidth = 1;
+      for (let i = -3; i <= 3; i++) {
+        ctx.beginPath();
+        ctx.ellipse(0, 1 + i * 3.5, 7.5 - Math.abs(i) * 0.7, 3, 0, Math.PI * 0.1, Math.PI * 0.9);
+        ctx.stroke();
+      }
+
+      // Long arms and extra joints.
+      ctx.strokeStyle = '#100d0b';
+      ctx.lineWidth = 3.4;
       ctx.beginPath();
-      ctx.moveTo(-7, -8);
-      ctx.quadraticCurveTo(-18, -2 + sway * 2, -14, 14);
-      ctx.moveTo(7, -8);
-      ctx.quadraticCurveTo(18, -2 - sway * 2, 14, 14);
+      ctx.moveTo(-7, -10);
+      ctx.quadraticCurveTo(-20, -4 + sway * 2, -17 - lunge * 0.4, 16);
+      ctx.moveTo(7, -10);
+      ctx.quadraticCurveTo(20, -4 - sway * 2, 17 + lunge * 0.4, 16);
       ctx.stroke();
-      ctx.fillStyle = '#c6baa4';
-      ctx.beginPath();
-      ctx.ellipse(0, -15, 5.6, 7.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#100d0b';
-      ctx.beginPath();
-      ctx.ellipse(-2.2, -15.6, 1.4, 2.2, 0, 0, Math.PI * 2);
-      ctx.ellipse(2.2, -15.6, 1.4, 2.2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(20, 15, 12, 0.8)';
+      ctx.strokeStyle = 'rgba(162, 141, 116, 0.5)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(-1.8, -11);
-      ctx.lineTo(1.8, -11);
+      ctx.moveTo(-18, 14);
+      ctx.lineTo(-21, 18);
+      ctx.moveTo(18, 14);
+      ctx.lineTo(21, 18);
       ctx.stroke();
-      ctx.fillStyle = 'rgba(190, 60, 40, 0.18)';
+
+      // Pale head, no eyes left to speak of.
+      ctx.fillStyle = '#c8bba5';
       ctx.beginPath();
-      ctx.ellipse(0, -15, 6, 8, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, -19, 5.6, 7.4, 0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = 'rgba(62, 47, 37, 0.4)';
+      ctx.beginPath();
+      ctx.ellipse(-2.4, -17.5, 2.2, 4.2, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#080606';
+      ctx.beginPath();
+      ctx.ellipse(-1.9, -20, 1.4, 2.5, 0.08, 0, Math.PI * 2);
+      ctx.ellipse(1.9, -20, 1.4, 2.5, -0.08, 0, Math.PI * 2);
+      ctx.fill();
+      const mouth = 1.2 + (hunting ? 1.4 : 0) + (monster.attackT > 0 ? 1.2 : 0);
+      ctx.strokeStyle = 'rgba(30, 22, 18, 0.9)';
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.moveTo(-1.7, -14);
+      ctx.lineTo(1.7, -14);
+      ctx.stroke();
+      ctx.fillStyle = '#120d0b';
+      ctx.beginPath();
+      ctx.ellipse(0, -13.5, 1.5, mouth, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(160, 33, 24, 0.4)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.moveTo(-2.4, -17);
+      ctx.lineTo(-3.4, -13);
+      ctx.moveTo(2.1, -18);
+      ctx.lineTo(3, -14);
+      ctx.stroke();
     } else {
+      // A shroud with nothing human left underneath.
       const float = Math.sin(monster.phase * 0.8) * 3;
       ctx.translate(0, -4 + float);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
       ctx.beginPath();
-      ctx.ellipse(0, 16 - float, 15, 5, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 20 - float, 16, 5, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#1c1916';
+      ctx.fillStyle = 'rgba(28, 24, 22, 0.97)';
       ctx.beginPath();
-      ctx.moveTo(-13, 14);
-      ctx.quadraticCurveTo(-14, -12, 0, -20);
-      ctx.quadraticCurveTo(14, -12, 13, 14);
+      ctx.moveTo(-13, 16);
+      ctx.quadraticCurveTo(-16, -8, -5, -19);
+      ctx.quadraticCurveTo(0, -24, 5, -19);
+      ctx.quadraticCurveTo(16, -8, 13, 16);
       ctx.lineTo(9, 9 + sway * 2);
-      ctx.lineTo(5, 15);
+      ctx.lineTo(5, 17);
       ctx.lineTo(1, 9 - sway * 2);
-      ctx.lineTo(-3, 15);
+      ctx.lineTo(-3, 17);
       ctx.lineTo(-7, 9 + sway);
-      ctx.lineTo(-10, 14);
+      ctx.lineTo(-10, 15);
       ctx.closePath();
       ctx.fill();
+      ctx.strokeStyle = 'rgba(156, 173, 170, 0.2)';
+      ctx.lineWidth = 0.9;
+      for (let i = -4; i <= 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 2, -18);
+        ctx.quadraticCurveTo(i * 4 + Math.sin(monster.phase + i) * 3, -2, i * 6, 17);
+        ctx.stroke();
+      }
+
       ctx.fillStyle = '#cec0aa';
       ctx.beginPath();
-      ctx.ellipse(0, -13, 5.4, 6.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, -12, 5.6, 7, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = '#0a0908';
+      ctx.fillStyle = '#080606';
       ctx.beginPath();
-      ctx.ellipse(-1.9, -14, 1.2, 1.6, 0, 0, Math.PI * 2);
-      ctx.ellipse(1.9, -14, 1.2, 1.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(-1.9, -13, 1.3, 1.9, 0.08, 0, Math.PI * 2);
+      ctx.ellipse(1.9, -13, 1.3, 1.9, -0.08, 0, Math.PI * 2);
       ctx.fill();
+      const open = 1.6 + (hunting ? 1.8 : 0) + (monster.attackT > 0 ? 1.4 : 0);
+      ctx.fillStyle = '#0b0807';
       ctx.beginPath();
-      ctx.ellipse(0, -10.4, 1.6, 3, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, -7.8, 1.4, open, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(178, 164, 143, 0.45)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.ellipse(0, -7.8, 1.8, open + 0.7, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(180, 196, 192, 0.08)';
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 17, 24, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
     if (monster.flash > 0) {
-      ctx.globalAlpha = Math.min(0.7, monster.flash * 5);
+      ctx.globalAlpha = Math.min(0.5, monster.flash * 4);
       ctx.fillStyle = '#f2e7d5';
       ctx.beginPath();
-      ctx.arc(0, -4, 18, 0, Math.PI * 2);
+      ctx.ellipse(0, -3, 16, 22, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     }
@@ -2031,7 +2456,7 @@ export class Game {
     const h = this.cssH;
     lc.setTransform(1, 0, 0, 1, 0, 0);
     lc.clearRect(0, 0, w, h);
-    lc.fillStyle = 'rgba(2, 2, 3, 0.87)';
+    lc.fillStyle = 'rgba(2, 2, 3, 0.86)';
     lc.fillRect(0, 0, w, h);
     lc.globalCompositeOperation = 'destination-out';
 
@@ -2040,33 +2465,49 @@ export class Game {
     const lightOn = !this.player.dead && this.player.flashlight && this.player.battery > 0;
     const flicker = this.reducedFx
       ? 0.9
-      : 0.84 +
-        Math.sin(this.time * 10.7) * 0.035 +
-        Math.sin(this.time * 26.3) * 0.025 +
-        (this.player.dread > 72 ? Math.random() * 0.12 : 0);
-    const radius = (lightOn ? 11 : 3.8) * TILE * flicker;
+      : 0.82 +
+        Math.sin(this.time * 10.7) * 0.045 +
+        Math.sin(this.time * 26.3) * 0.03 +
+        (this.player.dread > 72 ? Math.random() * 0.14 : 0);
+    const radius = (lightOn ? 11.5 : 3.8) * TILE * flicker;
 
+    // Close, soft fill light. The world is only half-remembered beyond this.
     const ambient = lc.createRadialGradient(px, py, 0, px, py, radius);
     ambient.addColorStop(0, 'rgba(255,255,255,1)');
-    ambient.addColorStop(0.55, 'rgba(255,255,255,0.9)');
+    ambient.addColorStop(0.42, 'rgba(255,255,255,0.97)');
+    ambient.addColorStop(0.72, 'rgba(255,255,255,0.72)');
     ambient.addColorStop(1, 'rgba(255,255,255,0)');
     lc.fillStyle = ambient;
     lc.fillRect(0, 0, w, h);
 
     if (lightOn) {
-      lc.save();
-      lc.beginPath();
-      lc.moveTo(px, py);
-      lc.arc(px, py, radius * 1.7, this.player.facing - 0.42, this.player.facing + 0.42);
-      lc.closePath();
-      lc.clip();
-      const cone = lc.createRadialGradient(px, py, 0, px, py, radius * 1.7);
-      cone.addColorStop(0, 'rgba(255,255,255,0.98)');
-      cone.addColorStop(0.45, 'rgba(255,255,255,0.78)');
-      cone.addColorStop(1, 'rgba(255,255,255,0)');
-      lc.fillStyle = cone;
-      lc.fillRect(px - radius * 1.8, py - radius * 1.8, radius * 3.6, radius * 3.6);
-      lc.restore();
+      const beam = (halfAngle: number, length: number, alpha: number): void => {
+        const beamRadius = radius * length;
+        lc.save();
+        lc.beginPath();
+        lc.moveTo(px, py);
+        lc.arc(px, py, beamRadius, this.player.facing - halfAngle, this.player.facing + halfAngle);
+        lc.closePath();
+        lc.clip();
+        const cone = lc.createRadialGradient(px, py, 0, px, py, beamRadius);
+        cone.addColorStop(0, `rgba(255,255,255,${alpha})`);
+        cone.addColorStop(0.34, `rgba(255,255,255,${alpha * 0.92})`);
+        cone.addColorStop(0.7, `rgba(255,255,255,${alpha * 0.48})`);
+        cone.addColorStop(1, 'rgba(255,255,255,0)');
+        lc.fillStyle = cone;
+        lc.fillRect(px - beamRadius, py - beamRadius, beamRadius * 2, beamRadius * 2);
+        lc.restore();
+      };
+      beam(0.76, 1.34, 0.24);
+      beam(0.54, 1.62, 0.46);
+      beam(0.34, 1.95, 0.84);
+
+      // A little spill below the lens, so the floor at your feet is readable.
+      const spill = lc.createRadialGradient(px, py, 0, px, py, radius * 0.5);
+      spill.addColorStop(0, 'rgba(255,255,255,0.5)');
+      spill.addColorStop(1, 'rgba(255,255,255,0)');
+      lc.fillStyle = spill;
+      lc.fillRect(px - radius, py - radius, radius * 2, radius * 2);
     }
 
     lc.globalCompositeOperation = 'source-over';
@@ -2075,66 +2516,175 @@ export class Game {
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const warm = ctx.createRadialGradient(px, py, 0, px, py, radius * 0.8);
-    warm.addColorStop(0, lightOn ? 'rgba(255, 206, 140, 0.16)' : 'rgba(150, 170, 205, 0.045)');
+    const warm = ctx.createRadialGradient(px, py, 0, px, py, radius * 0.95);
+    warm.addColorStop(0, lightOn ? 'rgba(255, 204, 136, 0.16)' : 'rgba(143, 164, 198, 0.035)');
+    warm.addColorStop(0.5, lightOn ? 'rgba(227, 166, 102, 0.06)' : 'rgba(100, 120, 150, 0.015)');
     warm.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = warm;
     ctx.beginPath();
-    ctx.arc(px, py, radius * 0.8, 0, Math.PI * 2);
+    ctx.arc(px, py, radius * 0.95, 0, Math.PI * 2);
     ctx.fill();
+
+    if (lightOn) {
+      // Add a directional wash on top of the cut-out so the cone reads on
+      // the dark masonry instead of only lifting the player's feet.
+      const beamLength = radius * 1.45;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      ctx.arc(px, py, beamLength, this.player.facing - 0.34, this.player.facing + 0.34);
+      ctx.closePath();
+      ctx.clip();
+      const beamGlow = ctx.createRadialGradient(px, py, 0, px, py, beamLength);
+      beamGlow.addColorStop(0, 'rgba(255, 210, 150, 0.02)');
+      beamGlow.addColorStop(0.18, 'rgba(255, 205, 145, 0.14)');
+      beamGlow.addColorStop(0.55, 'rgba(255, 185, 115, 0.07)');
+      beamGlow.addColorStop(1, 'rgba(255, 170, 100, 0)');
+      ctx.fillStyle = beamGlow;
+      ctx.fillRect(px - beamLength, py - beamLength, beamLength * 2, beamLength * 2);
+      ctx.restore();
+
+      const poolX = px + Math.cos(this.player.facing) * radius * 0.85;
+      const poolY = py + Math.sin(this.player.facing) * radius * 0.85;
+      const pool = ctx.createRadialGradient(poolX, poolY, 0, poolX, poolY, radius * 0.56);
+      pool.addColorStop(0, 'rgba(255, 205, 145, 0.08)');
+      pool.addColorStop(1, 'rgba(255, 185, 115, 0)');
+      ctx.fillStyle = pool;
+      ctx.beginPath();
+      ctx.arc(poolX, poolY, radius * 0.56, 0, Math.PI * 2);
+      ctx.fill();
+
+      const lens = ctx.createRadialGradient(px, py, 0, px, py, 68);
+      lens.addColorStop(0, 'rgba(255, 228, 178, 0.09)');
+      lens.addColorStop(1, 'rgba(255, 228, 178, 0)');
+      ctx.fillStyle = lens;
+      ctx.beginPath();
+      ctx.arc(px, py, 68, 0, Math.PI * 2);
+      ctx.fill();
+    }
     ctx.restore();
   }
 
   private renderScreenEffects(ctx: CanvasRenderingContext2D, w: number, h: number): void {
     const lowHp = this.player.hp < 35 && !this.player.dead;
+    const dread = this.player.dread;
     if (this.flashTimer > 0 && !this.reducedFx) {
-      ctx.fillStyle = `rgba(120, 16, 12, ${Math.min(0.3, this.flashTimer * 0.9)})`;
+      ctx.fillStyle = `rgba(120, 16, 12, ${Math.min(0.34, this.flashTimer * 0.95)})`;
       ctx.fillRect(0, 0, w, h);
+    }
+
+    // Blood on the lens after a bad hit or at death's door.
+    const lensAlpha = lowHp ? 0.16 + Math.sin(this.time * 2.4) * 0.04 : this.flashTimer > 0 ? 0.14 : 0;
+    if (lensAlpha > 0) {
+      const drops: Array<[number, number, number, number]> = [
+        [0.06, 0.2, 0.035, 0.011],
+        [0.11, 0.31, 0.018, 0.007],
+        [0.92, 0.17, 0.045, 0.014],
+        [0.87, 0.42, 0.018, 0.009],
+        [0.03, 0.62, 0.024, 0.008],
+        [0.97, 0.73, 0.032, 0.01],
+      ];
+      for (const [dx, dy, rx, ry] of drops) {
+        ctx.fillStyle = `rgba(72, 8, 7, ${lensAlpha})`;
+        ctx.beginPath();
+        ctx.ellipse(w * dx, h * (dy + Math.sin(this.time * 0.8 + dx * 9) * 0.004), w * rx, h * ry, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(190, 85, 68, ${lensAlpha * 0.22})`;
+        ctx.beginPath();
+        ctx.ellipse(w * dx - w * rx * 0.2, h * dy - h * ry * 0.2, w * rx * 0.24, h * ry * 0.18, 0.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     const vignette = ctx.createRadialGradient(
       w / 2,
       h / 2,
-      Math.min(w, h) * 0.22,
+      Math.min(w, h) * 0.18,
       w / 2,
       h / 2,
-      Math.max(w, h) * 0.75
+      Math.max(w, h) * 0.76
     );
     vignette.addColorStop(0, 'rgba(0,0,0,0)');
-    vignette.addColorStop(1, 'rgba(0,0,0,0.8)');
+    vignette.addColorStop(0.6, 'rgba(0,0,0,0.18)');
+    vignette.addColorStop(1, 'rgba(0,0,0,0.88)');
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, w, h);
 
     if (lowHp) {
-      const pulse = 0.12 + Math.sin(this.time * 4) * 0.05;
-      const red = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.72);
+      const pulse = 0.14 + Math.sin(this.time * 4) * 0.06;
+      const red = ctx.createRadialGradient(
+        w / 2,
+        h / 2,
+        Math.min(w, h) * 0.28,
+        w / 2,
+        h / 2,
+        Math.max(w, h) * 0.74
+      );
       red.addColorStop(0, 'rgba(90, 8, 8, 0)');
       red.addColorStop(1, `rgba(110, 10, 8, ${pulse})`);
       ctx.fillStyle = red;
       ctx.fillRect(0, 0, w, h);
     }
 
+    // Eyes at the edge of the light. They are not always attached to a body.
+    if (!this.reducedFx && !this.player.dead && dread > 48) {
+      const strength = (dread - 48) / 52;
+      for (let i = 0; i < 4; i++) {
+        const blink = Math.max(0, Math.sin(this.time * 0.9 + i * 2.1));
+        const alpha = strength * blink * 0.42;
+        if (alpha < 0.01) continue;
+        const side = i % 2 === 0 ? -1 : 1;
+        const x = w * (side < 0 ? 0.055 + i * 0.012 : 0.945 - i * 0.012);
+        const y = h * (0.18 + ((i * 29) % 60) / 100);
+        ctx.save();
+        ctx.fillStyle = `rgba(218, 54, 35, ${alpha})`;
+        ctx.shadowColor = 'rgba(230, 50, 32, 0.9)';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(x - 5, y, 1.7, 1.1, 0.1, 0, Math.PI * 2);
+        ctx.ellipse(x + 5, y, 1.7, 1.1, -0.1, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    if (!this.reducedFx && dread > 62 && !this.player.dead) {
+      const edge = ctx.createLinearGradient(0, 0, w, 0);
+      edge.addColorStop(0, `rgba(150, 20, 16, ${(dread - 62) / 500})`);
+      edge.addColorStop(0.04, 'rgba(150, 20, 16, 0)');
+      edge.addColorStop(0.96, 'rgba(20, 80, 86, 0)');
+      edge.addColorStop(1, `rgba(20, 80, 86, ${(dread - 62) / 600})`);
+      ctx.fillStyle = edge;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // Vertical scanlines keep the camera feeling like found footage.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.055)';
+    for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
+
     if (this.grainPattern) {
       ctx.save();
-      ctx.globalAlpha = 0.16;
+      ctx.globalAlpha = 0.2;
       ctx.translate(Math.random() * 60, Math.random() * 60);
       ctx.fillStyle = this.grainPattern;
       ctx.fillRect(-60, -60, w + 120, h + 120);
       ctx.restore();
     }
 
-    if (!this.reducedFx && this.player.dread > 68 && this.player.dead === false) {
-      const glitchChance = (this.player.dread - 68) / 900;
+    if (!this.reducedFx && dread > 58 && !this.player.dead) {
+      const glitchChance = (dread - 58) / 650;
       if (Math.random() < glitchChance) {
         const y = Math.random() * h;
-        const height = 1 + Math.random() * 3;
-        ctx.fillStyle = `rgba(160, 40, 30, ${0.08 + Math.random() * 0.12})`;
+        const height = 1 + Math.random() * 4;
+        ctx.fillStyle = `rgba(160, 40, 30, ${0.08 + Math.random() * 0.14})`;
         ctx.fillRect(0, y, w, height);
+        ctx.fillStyle = `rgba(40, 110, 115, ${0.04 + Math.random() * 0.06})`;
+        ctx.fillRect(0, y + 1, w, Math.max(1, height - 1));
       }
     }
 
-    if (this.player.dead && !this.ended) {
-      ctx.fillStyle = 'rgba(3, 3, 4, 0.35)';
+    if (this.player.dead && !this.deathScene && !this.ended) {
+      ctx.fillStyle = 'rgba(3, 3, 4, 0.4)';
       ctx.fillRect(0, 0, w, h);
     }
   }

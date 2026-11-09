@@ -16,6 +16,8 @@ export interface Monster {
   phase: number;
   attackCd: number;
   screamCd: number;
+  /** Local visual lunge timer, mirrored best-effort from the host. */
+  attackT: number;
   targetId: string | null;
 }
 

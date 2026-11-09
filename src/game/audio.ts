@@ -248,6 +248,20 @@ export class GameAudio {
     this.noise(1.5, 500, 0.16, 'lowpass', 0, 60);
   }
 
+  /** The sound of being caught: a sub-bass impact, bones, and a scream. */
+  caught(kind: 'crawler' | 'stalker' | 'wailer'): void {
+    this.noise(1.9, 1700, 0.3, 'lowpass', 0, 55);
+    this.tone(42, 2.3, 'sine', 0.36, 21);
+    this.tone(96, 1.5, 'sawtooth', 0.14, 34, 0.02);
+    this.tone(31, 1.2, 'triangle', 0.22, 18, 0.12);
+    this.noise(0.15, 3800, 0.25, 'highpass', 0.02);
+    this.noise(0.22, 900, 0.2, 'bandpass', 0.1, 180);
+    this.tone(290, 0.42, 'square', 0.05, 54, 0.06);
+    this.scream(kind);
+    this.noise(0.95, 500, 0.08, 'bandpass', 0.35, 1600);
+    this.tone(28, 0.85, 'sine', 0.3, 20, 1.9);
+  }
+
   whisper(): void {
     this.noise(0.5, 1700, 0.035, 'bandpass');
     this.tone(1400, 0.4, 'sine', 0.012, 900, 0.15);
