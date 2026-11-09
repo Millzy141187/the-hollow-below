@@ -217,7 +217,6 @@ export class Game {
   private lastHud = 0;
   private lastState = 0;
   private lastMonsters = 0;
-  private lastPresenceTime = 0;
   private stepSound = 0;
   private lowLightWarned = false;
   private lowHpWarned = false;
@@ -336,8 +335,11 @@ export class Game {
     const declaredHost = peers.find((peer) => peer.host && peer.id)?.id;
     this.hostId = declaredHost ?? sorted[0]?.id ?? this.playerId;
 
-    for (const id of [...this.remote.keys()]) {
-      if (!peers.some((p) => p.id === id)) this.remote.delete(id);
+    // Presence can flicker during a reconnect. Keep a recently seen player in
+    // the world until their messages have been silent for a while.
+    const present = new Set(peers.map((p) => p.id));
+    for (const [id, rp] of [...this.remote]) {
+      if (!present.has(id) && this.time - rp.lastSeen > 12) this.remote.delete(id);
     }
 
     if (this.multiplayer && this.running) {
@@ -1260,10 +1262,11 @@ export class Game {
     const viewPos = this.getViewTarget();
     this.computeVisibility(viewPos.x, viewPos.y);
 
-    // Network state.
+    // Network state. Broadcast regardless of the presence roster: presence can
+    // lag through a reconnect, and gating on it used to stop the host's player
+    // from moving for everyone else.
     if (this.multiplayer && this.sendFn) {
-      const others = this.peers.some((peer) => peer.id !== this.playerId);
-      if (others && this.time - this.lastState > SYNC_HZ) {
+      if (this.time - this.lastState > SYNC_HZ) {
         this.lastState = this.time;
         this.sendFn('ps', {
           x: round2(p.x),
@@ -1280,18 +1283,9 @@ export class Game {
           color: this.color,
         });
       }
-      if (this.isHost && others && this.time - this.lastMonsters > MONSTER_HZ) {
+      if (this.isHost && this.time - this.lastMonsters > MONSTER_HZ) {
         this.lastMonsters = this.time;
         this.sendMonsters();
-      }
-      if (this.time - this.lastPresenceTime > 2) {
-        this.lastPresenceTime = this.time;
-        this.hooks.presence({
-          hp: Math.round(p.hp),
-          dead: p.dead,
-          floor: this.floor,
-          seed: this.baseSeed,
-        });
       }
     }
 
@@ -1452,10 +1446,12 @@ export class Game {
   }
 
   private updateRemote(dt: number): void {
-    for (const rp of this.remote.values()) {
+    const present = new Set(this.peers.map((peer) => peer.id));
+    for (const [id, rp] of [...this.remote]) {
       rp.x = lerp(rp.x, rp.tx, Math.min(1, dt * 11));
       rp.y = lerp(rp.y, rp.ty, Math.min(1, dt * 11));
       rp.attack = Math.max(0, rp.attack - dt);
+      if (!present.has(id) && this.time - rp.lastSeen > 20) this.remote.delete(id);
     }
   }
 

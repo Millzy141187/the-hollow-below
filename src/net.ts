@@ -10,11 +10,11 @@ export interface NetHandlers {
 }
 
 const PRESENCE_WINDOW_MS = 30_000;
-const PRESENCE_MIN_INTERVAL_MS = 10_000;
+const PRESENCE_MIN_INTERVAL_MS = 15_000;
 // Supabase allows 5 track/untrack calls per client per 30 seconds and closes
-// the channel at the 6th. Stay well under it: three routine updates leave room
-// for the initial track and a reconnect track.
-const MAX_PRESENCE_TRACKS = 3;
+// the channel at the 6th. Two routine updates leave headroom for the initial
+// track and a reconnect while still keeping the roster warm.
+const MAX_PRESENCE_TRACKS = 2;
 const CONNECT_TIMEOUT_MS = 12_000;
 const MAX_RECONNECT_DELAY_MS = 15_000;
 
@@ -42,6 +42,8 @@ export class Net {
   private lastTrackedKey = '';
   private reconnectTimer: number | null = null;
   private reconnectAttempt = 0;
+  private presenceRetryTimer: number | null = null;
+  private joined = false;
   private connectTimer: number | null = null;
   private resolveConnect: (() => void) | null = null;
   private rejectConnect: ((error: Error) => void) | null = null;
@@ -79,7 +81,9 @@ export class Net {
       },
     });
     this.channel = channel;
+    this.joined = false;
     this.lastTrackedKey = '';
+    this.clearPresenceRetry();
 
     channel.on('presence', { event: 'sync' }, () => this.emitPeers());
     channel.on('presence', { event: 'join' }, () => this.emitPeers());
@@ -97,12 +101,14 @@ export class Net {
 
     if (status === 'SUBSCRIBED') {
       this.reconnectAttempt = 0;
+      this.joined = true;
       this.clearReconnectTimer();
       void this.onSubscribed(channel);
       return;
     }
 
     if (status !== 'CHANNEL_ERROR' && status !== 'TIMED_OUT' && status !== 'CLOSED') return;
+    this.joined = false;
 
     if (this.resolveConnect) {
       const message =
@@ -117,36 +123,72 @@ export class Net {
   }
 
   private async onSubscribed(channel: RealtimeChannel): Promise<void> {
+    const initial = this.resolveConnect !== null;
+
+    // Broadcast is usable as soon as the channel is subscribed. Presence is
+    // only the roster: never label a live channel "reconnecting" while it
+    // waits for a presence slot.
+    if (!initial) {
+      this.handlers.onStatus('connected');
+      this.emitPeers();
+      void this.trackPresence(channel, true);
+      return;
+    }
+
     await this.waitForPresenceSlot();
     if (this.closed || channel !== this.channel) return;
     const tracked = await this.trackNow(channel, true);
     if (this.closed || channel !== this.channel) return;
 
     if (!tracked) {
-      if (this.resolveConnect) {
-        this.failConnect(
-          new Error(
-            'Joined the channel but presence failed. Check that Realtime is enabled for this Supabase project.'
-          )
-        );
-      } else {
-        this.scheduleReconnect();
-      }
+      this.failConnect(
+        new Error(
+          'Joined the channel but presence failed. Check that Realtime is enabled for this Supabase project.'
+        )
+      );
       return;
     }
 
     this.handlers.onStatus('connected');
     this.emitPeers();
 
-    if (this.resolveConnect) {
-      const resolve = this.resolveConnect;
-      this.resolveConnect = null;
-      this.rejectConnect = null;
-      if (this.connectTimer !== null) {
-        clearTimeout(this.connectTimer);
-        this.connectTimer = null;
-      }
-      resolve();
+    const resolve = this.resolveConnect;
+    this.resolveConnect = null;
+    this.rejectConnect = null;
+    if (this.connectTimer !== null) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
+    resolve?.();
+  }
+
+  /** Presence is ancillary: retry it without tearing down a working channel. */
+  private async trackPresence(channel: RealtimeChannel, force: boolean): Promise<void> {
+    await this.waitForPresenceSlot();
+    if (this.closed || channel !== this.channel) return;
+    const tracked = await this.trackNow(channel, force);
+    if (this.closed || channel !== this.channel) return;
+    if (!tracked) {
+      this.schedulePresenceRetry(channel);
+      return;
+    }
+    this.emitPeers();
+    this.handlers.onStatus('connected');
+  }
+
+  private schedulePresenceRetry(channel: RealtimeChannel): void {
+    if (this.closed || this.presenceRetryTimer !== null) return;
+    this.presenceRetryTimer = window.setTimeout(() => {
+      this.presenceRetryTimer = null;
+      if (this.closed || channel !== this.channel) return;
+      void this.trackPresence(channel, true);
+    }, 5_000);
+  }
+
+  private clearPresenceRetry(): void {
+    if (this.presenceRetryTimer !== null) {
+      clearTimeout(this.presenceRetryTimer);
+      this.presenceRetryTimer = null;
     }
   }
 
@@ -165,17 +207,23 @@ export class Net {
     if (this.closed || this.reconnectTimer !== null) return;
     this.handlers.onStatus('reconnecting', err?.message);
     const attempt = this.reconnectAttempt++;
-    const presenceRateLimited = /presence|rate.?limit/i.test(err?.message ?? '');
-    const delay = presenceRateLimited
-      ? PRESENCE_WINDOW_MS + 1_000
-      : Math.min(MAX_RECONNECT_DELAY_MS, 1_000 * 2 ** Math.min(attempt, 4)) +
-        Math.floor(Math.random() * 350);
+    // A presence failure must not hold the broadcast channel hostage for 30s.
+    // Reconnect transport quickly; presence catches up in the background.
+    const delay =
+      Math.min(MAX_RECONNECT_DELAY_MS, 800 * 2 ** Math.min(attempt, 4)) +
+      Math.floor(Math.random() * 350);
+
+    // Detach the dead channel immediately. Otherwise send() keeps using it,
+    // Supabase silently falls back to REST, and one player keeps moving for
+    // the other while receiving nothing in return.
+    const old = this.channel;
+    this.channel = null;
+    this.joined = false;
+    this.clearPresenceRetry();
 
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
       if (this.closed) return;
-      const old = this.channel;
-      this.channel = null;
       const open = (): void => {
         if (!this.closed) this.openChannel();
       };
@@ -289,7 +337,10 @@ export class Net {
   }
 
   send(type: string, data: unknown): void {
-    if (!this.channel || this.closed) return;
+    // Never send through a channel that is still joining or has already
+    // dropped: the Supabase client would silently fall back to REST and create
+    // one-way traffic that looks like a frozen player on the other screen.
+    if (!this.channel || this.closed || !this.joined) return;
     try {
       void this.channel.send({
         type: 'broadcast',
@@ -321,7 +372,9 @@ export class Net {
 
   async leave(): Promise<void> {
     this.closed = true;
+    this.joined = false;
     this.clearReconnectTimer();
+    this.clearPresenceRetry();
     if (this.connectTimer !== null) {
       clearTimeout(this.connectTimer);
       this.connectTimer = null;
