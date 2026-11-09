@@ -38,6 +38,7 @@ export class GameAudio {
   private beatTimer = 0.4;
   private whisperTimer = 5;
   private ambienceTimer = 4;
+  private hush = 0;
   muted = false;
 
   async start(): Promise<void> {
@@ -204,12 +205,17 @@ export class GameAudio {
     }
   }
 
+  /** Drops the ambient bed away without muting the player's own actions. */
+  setHush(level: number): void {
+    this.hush = Math.max(0, Math.min(1, level));
+  }
+
   /** Drives the continuous predator bed from the game loop. */
   setStalk(intensity: number, pan: number, kind: MonsterKind = 'stalker'): void {
     const ac = this.ac;
     if (!ac || !this.stalkGain || !this.stalkPan || !this.stalkFilter || !this.stalkOsc) return;
     try {
-      const level = Math.max(0, Math.min(1, intensity));
+      const level = Math.max(0, Math.min(1, intensity)) * (1 - this.hush);
       const now = ac.currentTime;
       this.stalkGain.gain.setTargetAtTime(level * 0.11, now, 0.25);
       this.stalkPan.pan.setTargetAtTime(Math.max(-1, Math.min(1, pan)), now, 0.2);
@@ -313,10 +319,11 @@ export class GameAudio {
   update(tension: number, dt: number): void {
     if (!this.ac || !this.droneFilter || !this.droneGain) return;
     const now = this.ac.currentTime;
+    const quiet = 1 - this.hush;
     try {
       this.droneFilter.frequency.setTargetAtTime(134 + tension * 380, now, 0.5);
-      this.droneGain.gain.setTargetAtTime(0.042 + tension * 0.055, now, 0.6);
-      this.droneSub?.gain.setTargetAtTime(0.014 + tension * 0.03, now, 0.8);
+      this.droneGain.gain.setTargetAtTime((0.042 + tension * 0.055) * quiet, now, 0.6);
+      this.droneSub?.gain.setTargetAtTime((0.014 + tension * 0.03) * quiet, now, 0.8);
     } catch {
       /* ignore */
     }
@@ -329,15 +336,16 @@ export class GameAudio {
 
     this.whisperTimer -= dt;
     if (this.whisperTimer <= 0) {
-      if (tension > 0.4 && Math.random() < 0.7) this.whisper();
+      if (this.hush < 0.55 && tension > 0.4 && Math.random() < 0.7) this.whisper();
       this.whisperTimer = 7 + Math.random() * 12;
     }
 
-    // Something in the dark is always settling, far away.
+    // Something in the dark is always settling, far away. During a hush the
+    // room goes quiet instead, so the next sound has somewhere to land.
     this.ambienceTimer -= dt;
     if (this.ambienceTimer <= 0) {
       this.ambienceTimer = 6 + Math.random() * 11;
-      if (tension > 0.12) {
+      if (this.hush < 0.55 && tension > 0.12) {
         const pan = Math.random() * 1.8 - 0.9;
         const roll = Math.random();
         if (roll < 0.42) this.ambient('drip', pan);

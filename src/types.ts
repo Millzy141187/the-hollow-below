@@ -18,6 +18,8 @@ export interface Monster {
   screamCd: number;
   /** Local visual lunge timer, mirrored best-effort from the host. */
   attackT: number;
+  /** A held beat after first noticing the player, before the charge begins. */
+  stare: number;
   targetId: string | null;
 }
 

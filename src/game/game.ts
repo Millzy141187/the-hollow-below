@@ -102,6 +102,16 @@ interface TextChallenge {
   still: number;
 }
 
+/** A scare held back just long enough for the room to go quiet. */
+interface PendingScare {
+  kind: MonsterKind;
+  source: JumpScareScene['source'];
+  duration: number;
+  pan: number;
+  t: number;
+  beat: number;
+}
+
 interface GameOptions {
   canvas: HTMLCanvasElement;
   playerId: string;
@@ -201,6 +211,8 @@ export class Game {
   private buzzClock = 2;
   private monsterCueClock = 3;
   private jumpScare: JumpScareScene | null = null;
+  private pendingScare: PendingScare | null = null;
+  private releaseUntil = 0;
   private jumpScareCd = 0;
   private apparitionClock = 24;
   private seenJumpScare = new Set<string>();
@@ -354,6 +366,9 @@ export class Game {
     this.paused = paused || this.ended;
     if (paused) {
       this.jumpScare = null;
+      this.pendingScare = null;
+      this.releaseUntil = 0;
+      this.audio.setHush(0);
       this.audio.setStalk(0, 0, 'stalker');
     }
     if (!paused) this.lastFrame = performance.now();
@@ -578,6 +593,7 @@ export class Game {
           attackCd: 1,
           screamCd: 2,
           attackT: 0,
+          stare: 0,
           targetId: null,
         };
         this.monsters.set(id, monster);
@@ -594,6 +610,7 @@ export class Game {
         this.detectionCue(monster);
       }
       if (raw.length > 7) monster.attackT = Math.max(monster.attackT, clamp(num(raw[7], 0), 0, 0.32));
+      if (raw.length > 8) monster.stare = clamp(num(raw[8], 0), 0, 2);
       seen.add(id);
     }
     for (const id of [...this.monsters.keys()]) {
@@ -802,6 +819,7 @@ export class Game {
     monster.hp -= damage;
     monster.flash = 0.16;
     monster.hunt = true;
+    monster.stare = 0;
     if (monster.hp > 0) return;
     this.monsters.delete(monster.id);
     this.spawnBlood(monster.x, monster.y, 2.4);
@@ -842,9 +860,12 @@ export class Game {
     if (this.player.dead) return;
     this.player.dead = true;
     this.jumpScare = null;
+    this.pendingScare = null;
+    this.releaseUntil = 0;
     this.challenge = null;
     this.darkDrain = 0;
     this.invulnUntil = 0;
+    this.audio.setHush(0);
     this.audio.setStalk(0, 0, 'stalker');
     this.player.flashlight = false;
     this.player.attackT = 0;
@@ -943,7 +964,7 @@ export class Game {
       this.audio.fuse();
       if (bySelf && !this.fuseScareDone) {
         this.fuseScareDone = true;
-        this.triggerJumpScare('stalker', 'fuse', 0.62, 0, true);
+        this.scheduleScare('stalker', 'fuse', 0.62, 0);
       }
       if (this.fuses >= 3 && previousFuses < 3) {
         this.hooks.toast('The stairwell seal breaks. Get to the stairs.', 'info');
@@ -993,6 +1014,9 @@ export class Game {
     this.fuseScareDone = false;
     this.challenge = null;
     this.lastChallenge = null;
+    this.pendingScare = null;
+    this.releaseUntil = 0;
+    this.audio.setHush(0);
     this.whisperClock = 28;
     this.unseenClock = 18;
     this.unseenCd = 0;
@@ -1081,6 +1105,7 @@ export class Game {
       attackCd: 0.55,
       screamCd: 2 + Math.random() * 4,
       attackT: 0,
+      stare: 0.7,
       targetId,
     });
     this.lastMonsters = this.time;
@@ -1135,6 +1160,7 @@ export class Game {
         attackCd: 1 + rand(),
         screamCd: 3 + rand() * 5,
         attackT: 0,
+        stare: 0,
         targetId: null,
       });
     }
@@ -1209,6 +1235,9 @@ export class Game {
       if (sees) {
         if (!monster.hunt) {
           this.detectionCue(monster);
+          // A hunter does not lunge the instant it notices you. It holds
+          // still long enough for you to realise it has been watching.
+          monster.stare = monster.kind === 'crawler' ? 0.35 : 0.85 + Math.random() * 0.65;
         }
         monster.hunt = true;
         monster.targetId = target.id;
@@ -1218,6 +1247,12 @@ export class Game {
       }
 
       monster.phase += dt * (monster.hunt ? 6 : 1.5);
+
+      if (monster.stare > 0.01) {
+        monster.stare = Math.max(0, monster.stare - dt);
+        monster.phase += dt * 2.4;
+        continue;
+      }
 
       if (monster.hunt) {
         const dx = target.x - monster.x;
@@ -1302,6 +1337,7 @@ export class Game {
       Math.round(m.maxHp),
       m.hunt ? 1 : 0,
       round2(m.attackT),
+      round2(m.stare),
     ]);
     this.sendFn('ms', { m: list });
   }
@@ -1456,6 +1492,9 @@ export class Game {
       0,
       1
     );
+    this.audio.setHush(
+      this.pendingScare ? 0.95 : this.time < this.releaseUntil ? 0.42 : 0
+    );
     this.audio.update(tension, dt);
 
     // Proximity is a sound before it is a sight. The predator bed swells and
@@ -1531,6 +1570,10 @@ export class Game {
       if (this.ghost.t >= this.ghost.life) this.ghost = null;
     }
     if (this.player.dead) return;
+
+    // Hush is not empty: it is the room waiting for the next sound. Keep the
+    // existing ghost visible, but stop feeding new ambience into the pause.
+    if (this.pendingScare || this.time < this.releaseUntil) return;
 
     // Water finding its way down from somewhere you cannot see.
     this.dripClock -= dt;
@@ -1626,7 +1669,15 @@ export class Game {
 
     if (this.challenge) this.updateChallenge(dt);
 
+    if (this.pendingScare) {
+      this.updatePendingScare(dt);
+      return;
+    }
+
     if (this.player.dead || this.ended || this.deathScene || this.descendTimer > 0) return;
+
+    // A scare needs a quiet room after it, not another event on top.
+    if (this.time < this.releaseUntil) return;
 
     // A hunter that gets close enough to see you gets one close-up. The face is
     // a flinch, not a new monster: the real one is still in the room.
@@ -1658,9 +1709,11 @@ export class Game {
       this.apparitionClock = 38 + Math.random() * 34;
       if (this.player.dread > 14 || this.time > 20) {
         const kind: MonsterKind = this.floor >= 2 && Math.random() < 0.35 ? 'wailer' : 'stalker';
-        this.triggerJumpScare(kind, 'apparition', 0.5, (Math.random() - 0.5) * 1.2);
+        this.scheduleScare(kind, 'apparition', 0.5, (Math.random() - 0.5) * 1.2);
       }
     }
+
+    if (this.pendingScare) return;
 
     // Words in the dust, only when the mind is already primed. The old
     // atmospheric whispers now carry rules the player has to obey.
@@ -1858,6 +1911,46 @@ export class Game {
     }
   }
 
+  private scheduleScare(
+    kind: MonsterKind,
+    source: JumpScareScene['source'],
+    duration: number,
+    pan = 0
+  ): void {
+    if (
+      this.pendingScare ||
+      this.jumpScare ||
+      this.player.dead ||
+      this.ended ||
+      this.deathScene ||
+      this.descendTimer > 0 ||
+      this.paused ||
+      this.time < this.releaseUntil
+    ) {
+      return;
+    }
+    this.pendingScare = { kind, source, duration, pan, t: 0, beat: 0.55 };
+    this.audio.setHush(0.95);
+    this.audio.heartbeat(0.9);
+    this.audio.behindBreath(pan * 0.35);
+  }
+
+  private updatePendingScare(dt: number): void {
+    const pending = this.pendingScare;
+    if (!pending) return;
+    pending.t += dt;
+    pending.beat -= dt;
+    if (pending.beat <= 0) {
+      pending.beat = 0.55;
+      this.audio.heartbeat(0.95);
+    }
+    if (pending.t >= 1.35) {
+      this.pendingScare = null;
+      this.audio.setHush(0);
+      this.triggerJumpScare(pending.kind, pending.source, pending.duration, pending.pan, true);
+    }
+  }
+
   private triggerJumpScare(
     kind: MonsterKind,
     source: JumpScareScene['source'],
@@ -1867,6 +1960,9 @@ export class Game {
   ): void {
     if (this.jumpScare || this.player.dead || this.ended || this.deathScene || this.paused) return;
     if (!force && this.jumpScareCd > 0) return;
+    this.pendingScare = null;
+    this.releaseUntil = this.time + 4.5;
+    this.audio.setHush(0);
     this.jumpScare = {
       t: 0,
       duration: this.reducedFx ? duration * 0.85 : duration,
@@ -2047,8 +2143,11 @@ export class Game {
     if (this.ended) return;
     this.ended = true;
     this.jumpScare = null;
+    this.pendingScare = null;
+    this.releaseUntil = 0;
     this.challenge = null;
     this.darkDrain = 0;
+    this.audio.setHush(0);
     this.audio.setStalk(0, 0, 'stalker');
     this.endedCause = cause;
     if (!this.player.dead) {
@@ -4039,6 +4138,22 @@ export class Game {
     const dread = this.player.dread;
     if (this.flashTimer > 0 && !this.reducedFx) {
       ctx.fillStyle = `rgba(120, 16, 12, ${Math.min(0.34, this.flashTimer * 0.95)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    if (this.pendingScare && !this.player.dead) {
+      const progress = clamp(this.pendingScare.t / 1.35, 0, 1);
+      const edge = ctx.createRadialGradient(
+        w / 2,
+        h / 2,
+        Math.min(w, h) * 0.2,
+        w / 2,
+        h / 2,
+        Math.max(w, h) * 0.72
+      );
+      edge.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      edge.addColorStop(1, `rgba(0, 0, 0, ${0.08 + progress * 0.16})`);
+      ctx.fillStyle = edge;
       ctx.fillRect(0, 0, w, h);
     }
 
