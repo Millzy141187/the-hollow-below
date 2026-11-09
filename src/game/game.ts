@@ -65,6 +65,22 @@ interface Splat {
   alpha: number;
 }
 
+interface Ripple {
+  x: number;
+  y: number;
+  t: number;
+  life: number;
+}
+
+/** A shape at the edge of the light that is never there when you look again. */
+interface Ghost {
+  x: number;
+  y: number;
+  t: number;
+  life: number;
+  seed: number;
+}
+
 interface GameOptions {
   canvas: HTMLCanvasElement;
   playerId: string;
@@ -153,6 +169,16 @@ export class Game {
   private monsters = new Map<string, Monster>();
   private particles: Particle[] = [];
   private splats: Splat[] = [];
+  private ripples: Ripple[] = [];
+  private ghost: Ghost | null = null;
+  private fogPattern: CanvasPattern | null = null;
+  private ambientClock = 6;
+  private dripClock = 1.6;
+  private scareClock = 22;
+  private stingClock = 8;
+  private breathClock = 3;
+  private buzzClock = 2;
+  private monsterCueClock = 3;
 
   private peers: PeerPresence[] = [];
   private hostId = '';
@@ -240,6 +266,7 @@ export class Game {
     };
 
     this.makeGrain();
+    this.makeFog();
     this.resize();
     this.hooks.presence({ hp: 100, dead: false, floor: this.floor, seed: this.baseSeed });
     this.setPeers(this.peers);
@@ -481,7 +508,12 @@ export class Game {
       monster.maxHp = maxHp;
       if (hp < monster.hp) monster.flash = 0.14;
       monster.hp = clamp(hp, 0, maxHp);
+      const wasHunting = monster.hunt;
       monster.hunt = raw[6] === 1;
+      if (monster.hunt && !wasHunting) {
+        this.audio.scream(kind);
+        if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.16);
+      }
       if (raw.length > 7) monster.attackT = Math.max(monster.attackT, clamp(num(raw[7], 0), 0, 0.32));
       seen.add(id);
     }
@@ -853,6 +885,13 @@ export class Game {
     this.monsters.clear();
     this.particles = [];
     this.splats = [];
+    this.ripples = [];
+    this.ghost = null;
+    this.ambientClock = 5;
+    this.dripClock = 1.6;
+    this.scareClock = 18;
+    this.stingClock = 6;
+    this.monsterCueClock = 3;
     this.fuses = 0;
     this.descendTimer = 0;
 
@@ -974,6 +1013,10 @@ export class Game {
         targetDist < stats.sight &&
         lineOfSight(this.dungeon, monster.x, monster.y, target.x, target.y);
       if (sees) {
+        if (!monster.hunt) {
+          this.audio.scream(monster.kind);
+          if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.18);
+        }
         monster.hunt = true;
         monster.targetId = target.id;
       } else if (targetDist > stats.sight + 5) {
@@ -1186,6 +1229,7 @@ export class Game {
     this.updateMonsters(dt);
     this.updateRemote(dt);
     this.updateParticles(dt);
+    this.updateAtmosphere(dt);
 
     // Dread rises near unseen things and in the dark.
     let nearest = 40;
@@ -1268,6 +1312,142 @@ export class Game {
           (known.length === others.length && known.every((peer) => this.remote.get(peer.id)?.dead));
         if (allDead && this.time - this.deadAt > 5.7) this.endRun('Your whole party is gone.');
       }
+    }
+  }
+
+  private updateAtmosphere(dt: number): void {
+    for (const ripple of this.ripples) ripple.t += dt;
+    this.ripples = this.ripples.filter((ripple) => ripple.t < ripple.life);
+
+    if (this.ghost) {
+      this.ghost.t += dt;
+      if (this.ghost.t >= this.ghost.life) this.ghost = null;
+    }
+    if (this.player.dead) return;
+
+    // Water finding its way down from somewhere you cannot see.
+    this.dripClock -= dt;
+    if (this.dripClock <= 0) {
+      this.dripClock = 1.2 + Math.random() * 3.4;
+      this.spawnDrip();
+    }
+
+    this.ambientClock -= dt;
+    if (this.ambientClock <= 0) {
+      this.ambientClock = 6 + Math.random() * 9;
+      const pan = Math.random() * 1.6 - 0.8;
+      const roll = Math.random();
+      this.audio.ambient(roll < 0.42 ? 'drip' : roll < 0.72 ? 'creak' : 'distantStep', pan);
+    }
+
+    this.breathClock -= dt;
+    if (this.breathClock <= 0 && (this.player.stamina < 34 || this.player.dread > 78)) {
+      this.breathClock = this.player.stamina < 24 ? 1.7 : 2.8;
+      this.audio.catchBreath();
+    }
+
+    if (this.player.flashlight && this.player.battery < 18) {
+      this.buzzClock -= dt;
+      if (this.buzzClock <= 0) {
+        this.buzzClock = 2.2 + Math.random() * 4;
+        this.audio.lightBuzz();
+      }
+    }
+
+    // It steps into the beam, and is gone before you can be sure.
+    this.scareClock -= dt;
+    if (this.scareClock <= 0) {
+      this.scareClock = Math.max(16, 38 - this.player.dread * 0.14) + Math.random() * 14;
+      if (this.player.dread > 26 && !this.ghost) this.spawnGhost();
+    }
+
+    this.stingClock -= dt;
+    if (this.stingClock <= 0) {
+      let closest: Monster | null = null;
+      let closestDist = Infinity;
+      for (const monster of this.monsters.values()) {
+        if (!this.isVisibleAt(monster.x, monster.y)) continue;
+        const dist = Math.hypot(monster.x - this.player.x, monster.y - this.player.y);
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = monster;
+        }
+      }
+      if (closest && closestDist < 3.8) {
+        this.stingClock = 10 + Math.random() * 5;
+        this.audio.sting();
+        if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.22);
+      } else {
+        this.stingClock = 1.5;
+      }
+    }
+
+    this.monsterCueClock -= dt;
+    if (this.monsterCueClock <= 0) {
+      this.monsterCueClock = 2.8 + Math.random() * 3.4;
+      let nearest: Monster | null = null;
+      let nearestDist = Infinity;
+      for (const monster of this.monsters.values()) {
+        const dist = Math.hypot(monster.x - this.player.x, monster.y - this.player.y);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = monster;
+        }
+      }
+      if (nearest && nearestDist < 13) {
+        const angle = Math.atan2(nearest.y - this.player.y, nearest.x - this.player.x);
+        const pan = Math.sin(angleDiff(angle, this.player.facing)) * 0.85;
+        const intensity = clamp(1 - nearestDist / 15, 0.12, 1);
+        this.audio.monsterCue(nearest.kind, pan, intensity);
+      }
+    }
+  }
+
+  private spawnDrip(): void {
+    for (let tries = 0; tries < 18; tries++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 1.6 + Math.random() * 7.5;
+      const x = this.player.x + Math.cos(angle) * dist;
+      const y = this.player.y + Math.sin(angle) * dist;
+      const tx = Math.floor(x);
+      const ty = Math.floor(y);
+      if (tx < 0 || ty < 0 || tx >= this.dungeon.w || ty >= this.dungeon.h) continue;
+      if (this.dungeon.tiles[ty * this.dungeon.w + tx] === WALL) continue;
+      if (!this.explored[ty * this.dungeon.w + tx]) continue;
+      this.ripples.push({ x, y, t: 0, life: 0.8 });
+      for (let i = 0; i < 3; i++) {
+        this.spawnParticle({
+          x: x + (Math.random() - 0.5) * 0.12,
+          y: y + (Math.random() - 0.5) * 0.12,
+          vx: (Math.random() - 0.5) * 0.5,
+          vy: -0.4 - Math.random() * 0.6,
+          life: 0.25 + Math.random() * 0.2,
+          max: 0.45,
+          size: 1.2,
+          color: 'rgba(150, 170, 176, 0.4)',
+          gravity: 2.4,
+          glow: false,
+        });
+      }
+      this.audio.ambient('drip', Math.sin(angleDiff(angle, this.player.facing)) * 0.7);
+      return;
+    }
+  }
+
+  private spawnGhost(): void {
+    if (this.ghost) return;
+    const facing = this.player.facing;
+    for (let tries = 0; tries < 26; tries++) {
+      const angle = facing + (Math.random() - 0.5) * 1.35;
+      const dist = 5.4 + Math.random() * 4.2;
+      const x = this.player.x + Math.cos(angle) * dist;
+      const y = this.player.y + Math.sin(angle) * dist;
+      if (isBlocked(this.dungeon, x, y, 0.2)) continue;
+      if (!lineOfSight(this.dungeon, this.player.x, this.player.y, x, y)) continue;
+      this.ghost = { x, y, t: 0, life: 1.8 + Math.random() * 0.6, seed: Math.random() * 100 };
+      this.audio.ambient('whisper', Math.sin(angleDiff(angle, facing)) * 0.6);
+      if (!this.reducedFx) this.shake = Math.min(1, this.shake + 0.1);
+      return;
     }
   }
 
@@ -1493,8 +1673,17 @@ export class Game {
     ctx.fillRect(0, 0, w, h);
 
     const view = this.getViewTarget();
-    const targetX = clamp(view.x * TILE - w / 2, 0, Math.max(0, this.dungeon.w * TILE - w));
-    const targetY = clamp(view.y * TILE - h / 2, 0, Math.max(0, this.dungeon.h * TILE - h));
+    const lookAhead = !this.player.dead ? (this.reducedFx ? 12 : 30) : 0;
+    const targetX = clamp(
+      view.x * TILE - w / 2 + Math.cos(this.player.facing) * lookAhead,
+      0,
+      Math.max(0, this.dungeon.w * TILE - w)
+    );
+    const targetY = clamp(
+      view.y * TILE - h / 2 + Math.sin(this.player.facing) * lookAhead,
+      0,
+      Math.max(0, this.dungeon.h * TILE - h)
+    );
     if (!this.camReady) {
       this.cam.x = targetX;
       this.cam.y = targetY;
@@ -1508,13 +1697,21 @@ export class Game {
     const shakeAmount = this.reducedFx ? 0 : this.shake;
     const shakeX = shakeAmount ? (Math.random() - 0.5) * 22 * shakeAmount : 0;
     const shakeY = shakeAmount ? (Math.random() - 0.5) * 22 * shakeAmount : 0;
-    const camX = this.cam.x + shakeX;
-    const camY = this.cam.y + shakeY;
+    // A body does not hold a camera still. Fear makes it worse.
+    const unease = this.reducedFx ? 0 : 1 + (1 - this.player.hp / this.player.maxHp) * 0.7;
+    const swayX = Math.sin(this.time * 1.7) * 1.1 * unease + Math.sin(this.player.walk * 2) * 0.6;
+    const swayY = Math.cos(this.time * 1.35) * 0.8 * unease;
+    const camX = this.cam.x + shakeX + swayX;
+    const camY = this.cam.y + shakeY + swayY;
 
     ctx.save();
     ctx.translate(-camX, -camY);
 
     this.drawTiles(ctx, camX, camY, w, h);
+    this.drawDecals(ctx);
+    this.drawScrawls(ctx);
+    this.drawCandles(ctx);
+    this.drawRipples(ctx);
     this.drawSplats(ctx);
     this.drawStairs(ctx);
     for (const pickup of this.pickups) {
@@ -1533,6 +1730,9 @@ export class Game {
     for (const rp of this.remote.values()) {
       if (!this.isVisibleAt(rp.x, rp.y)) continue;
       drawables.push({ y: rp.y, draw: () => this.drawRemote(ctx, rp) });
+    }
+    if (this.ghost) {
+      drawables.push({ y: this.ghost.y, draw: () => this.drawGhost(ctx) });
     }
     if (!this.player.dead) {
       drawables.push({ y: this.player.y, draw: () => this.drawLocalPlayer(ctx) });
@@ -1561,6 +1761,7 @@ export class Game {
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    this.drawFog(ctx, w, h);
     this.renderLighting(ctx, camX, camY, view);
     this.renderScreenEffects(ctx, w, h);
     if (this.deathScene) {
@@ -1745,6 +1946,308 @@ export class Game {
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  private drawDecals(ctx: CanvasRenderingContext2D): void {
+    const w = this.dungeon.w;
+    for (const decal of this.dungeon.decals) {
+      const tx = Math.floor(decal.x);
+      const ty = Math.floor(decal.y);
+      const index = ty * w + tx;
+      if (!this.explored[index]) continue;
+      const visible = this.visible.has(index);
+      const r = decal.r * TILE;
+      ctx.save();
+      ctx.globalAlpha = visible ? 1 : 0.3;
+      ctx.translate(decal.x * TILE, decal.y * TILE);
+      ctx.rotate(decal.rot);
+      switch (decal.kind) {
+        case 0: {
+          ctx.fillStyle = `rgba(24, 18, 14, ${decal.alpha * 0.72})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r, r * 0.45, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(58, 44, 31, ${decal.alpha * 0.32})`;
+          ctx.beginPath();
+          ctx.ellipse(r * 0.2, -r * 0.05, r * 0.6, r * 0.3, 0.3, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case 1: {
+          ctx.fillStyle = `rgba(52, 8, 7, ${decal.alpha * 0.9})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r, r * 0.52, 0, 0, Math.PI * 2);
+          ctx.fill();
+          for (let i = 0; i < 6; i++) {
+            ctx.fillStyle = `rgba(63, 10, 8, ${decal.alpha * 0.75})`;
+            ctx.beginPath();
+            ctx.arc(Math.cos(i * 1.7) * r * 1.2, Math.sin(i * 1.3) * r * 0.72, 1 + (i % 3), 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+        }
+        case 2: {
+          ctx.strokeStyle = `rgba(46, 9, 8, ${decal.alpha * 0.8})`;
+          for (let i = 0; i < 5; i++) {
+            ctx.lineWidth = 2 + (i % 3);
+            ctx.beginPath();
+            ctx.moveTo(-r, -r * 0.45 + i * r * 0.22);
+            ctx.quadraticCurveTo(0, -r * 0.2 + i * r * 0.18, r, -r * 0.55 + i * r * 0.24);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 3: {
+          ctx.strokeStyle = `rgba(154, 142, 120, ${decal.alpha})`;
+          ctx.fillStyle = `rgba(168, 157, 134, ${decal.alpha})`;
+          for (let i = 0; i < 4; i++) {
+            const bx = (i - 1.5) * r * 0.3;
+            const by = (i % 2 ? 1 : -1) * r * 0.18;
+            ctx.lineWidth = 1.6;
+            ctx.beginPath();
+            ctx.moveTo(bx - 4, by);
+            ctx.lineTo(bx + 4, by + 1);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(bx, by - 1.5, 1.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          ctx.beginPath();
+          ctx.ellipse(0, -r * 0.3, 3.4, 3, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(20, 14, 11, 0.85)';
+          ctx.beginPath();
+          ctx.arc(-1.2, -r * 0.32, 0.8, 0, Math.PI * 2);
+          ctx.arc(1.2, -r * 0.32, 0.8, 0, Math.PI * 2);
+          ctx.fill();
+          break;
+        }
+        case 4: {
+          ctx.strokeStyle = `rgba(186, 188, 176, ${decal.alpha * 0.62})`;
+          ctx.lineWidth = 0.7;
+          for (let i = 0; i < 5; i++) {
+            const a = 0.08 + (i / 5) * (Math.PI / 2);
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.quadraticCurveTo(Math.cos(a) * r * 0.5, Math.sin(a) * r * 0.2, Math.cos(a) * r, Math.sin(a) * r);
+            ctx.stroke();
+          }
+          for (let ring = 1; ring <= 3; ring++) {
+            ctx.beginPath();
+            ctx.arc(0, 0, (r / 3) * ring, 0.05, Math.PI / 2 - 0.05);
+            ctx.stroke();
+          }
+          break;
+        }
+        case 5: {
+          for (let i = 0; i < 5; i++) {
+            const bx = Math.cos(i * 2.1) * r * 0.8;
+            const by = Math.sin(i * 1.7) * r * 0.45;
+            ctx.fillStyle = `rgba(${52 + i * 7}, ${48 + i * 5}, ${40 + i * 4}, ${decal.alpha})`;
+            ctx.save();
+            ctx.translate(bx, by);
+            ctx.rotate(i * 1.2);
+            ctx.fillRect(-3, -1.5, 6, 3);
+            ctx.restore();
+          }
+          break;
+        }
+        case 6: {
+          const wet = ctx.createRadialGradient(0, 0, 1, 0, 0, r);
+          wet.addColorStop(0, `rgba(38, 48, 50, ${decal.alpha * 0.62})`);
+          wet.addColorStop(0.7, `rgba(22, 28, 30, ${decal.alpha * 0.48})`);
+          wet.addColorStop(1, 'rgba(12, 16, 18, 0)');
+          ctx.fillStyle = wet;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, r, r * 0.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = `rgba(150, 158, 150, ${decal.alpha * 0.18})`;
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.ellipse(-r * 0.15, -r * 0.1, r * 0.45, r * 0.14, 0.1, 0, Math.PI * 2);
+          ctx.stroke();
+          break;
+        }
+        default: {
+          ctx.strokeStyle = `rgba(34, 26, 20, ${decal.alpha * 0.9})`;
+          ctx.lineWidth = 1.2;
+          for (let i = 0; i < 4; i++) {
+            ctx.beginPath();
+            ctx.moveTo(-r, -r * 0.3 + i * r * 0.16);
+            ctx.lineTo(r, -r * 0.2 + i * r * 0.16);
+            ctx.stroke();
+          }
+          break;
+        }
+      }
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  private drawScrawls(ctx: CanvasRenderingContext2D): void {
+    for (const scrawl of this.dungeon.scrawls) {
+      const tx = Math.floor(scrawl.x);
+      const ty = Math.floor(scrawl.y);
+      const index = ty * this.dungeon.w + tx;
+      if (index < 0 || !this.explored[index]) continue;
+      const visible = this.visible.has(index);
+      ctx.save();
+      ctx.translate(scrawl.x * TILE, scrawl.y * TILE);
+      ctx.rotate(scrawl.rot);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '7px ui-monospace, monospace';
+      ctx.fillStyle = `rgba(112, 24, 19, ${scrawl.alpha * (visible ? 1 : 0.48)})`;
+      ctx.fillText(scrawl.text, 0, 0);
+      ctx.fillStyle = `rgba(74, 16, 13, ${scrawl.alpha * 0.5})`;
+      ctx.fillText(scrawl.text, 0.7, 0.8);
+      ctx.restore();
+    }
+  }
+
+  private drawCandles(ctx: CanvasRenderingContext2D): void {
+    for (const candle of this.dungeon.candles) {
+      const tx = Math.floor(candle.x);
+      const ty = Math.floor(candle.y);
+      const index = ty * this.dungeon.w + tx;
+      if (!this.explored[index]) continue;
+      const visible = this.visible.has(index);
+      const flick = 0.7 + Math.sin(this.time * 9.3 + candle.phase) * 0.16 + Math.sin(this.time * 21.7 + candle.phase) * 0.08;
+      ctx.save();
+      ctx.translate(candle.x * TILE, candle.y * TILE);
+      ctx.globalAlpha = visible ? 1 : 0.28;
+      const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 34 * flick);
+      glow.addColorStop(0, `rgba(255, 184, 104, ${0.22 * flick})`);
+      glow.addColorStop(1, 'rgba(255, 150, 70, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(-40, -40, 80, 80);
+
+      ctx.fillStyle = '#2a221b';
+      ctx.beginPath();
+      ctx.ellipse(0, 2, 3.2, 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#b7a78b';
+      ctx.fillRect(-1.8, -3, 3.6, 6);
+      ctx.fillStyle = '#8d7f68';
+      ctx.fillRect(-1.8, -3, 1.1, 6);
+
+      ctx.fillStyle = `rgba(255, 208, 128, ${0.85 * flick})`;
+      ctx.beginPath();
+      ctx.ellipse(0, -6.5, 1.5, 3.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 246, 206, 0.95)';
+      ctx.beginPath();
+      ctx.ellipse(0, -6, 0.7, 1.8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 170, 84, ${0.2 * flick})`;
+      ctx.beginPath();
+      ctx.arc(0, -6, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  private drawRipples(ctx: CanvasRenderingContext2D): void {
+    for (const ripple of this.ripples) {
+      if (!this.isVisibleAt(ripple.x, ripple.y)) continue;
+      const p = ripple.t / ripple.life;
+      ctx.save();
+      ctx.strokeStyle = `rgba(158, 176, 180, ${(1 - p) * 0.3})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(ripple.x * TILE, ripple.y * TILE + 3, 2 + p * 13, 1 + p * 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      if (p < 0.55) {
+        ctx.strokeStyle = `rgba(158, 176, 180, ${(1 - p) * 0.18})`;
+        ctx.beginPath();
+        ctx.ellipse(ripple.x * TILE, ripple.y * TILE + 3, 1 + p * 6, 0.6 + p * 2.4, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  private drawGhost(ctx: CanvasRenderingContext2D): void {
+    const ghost = this.ghost;
+    if (!ghost) return;
+    const p = Math.min(1, ghost.t / ghost.life);
+    const alpha = Math.sin(p * Math.PI) * 0.72;
+    if (alpha <= 0.01) return;
+    const jitter = Math.sin(ghost.t * 28 + ghost.seed) * 1.3;
+    ctx.save();
+    ctx.translate(ghost.x * TILE + jitter, ghost.y * TILE);
+    ctx.globalAlpha = alpha;
+    const shade = ctx.createRadialGradient(0, 4, 1, 0, 6, 28);
+    shade.addColorStop(0, 'rgba(0, 0, 0, 0.55)');
+    shade.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = shade;
+    ctx.beginPath();
+    ctx.ellipse(0, 6, 26, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const body = ctx.createLinearGradient(0, -34, 0, 8);
+    body.addColorStop(0, 'rgba(3, 3, 4, 0.98)');
+    body.addColorStop(0.72, 'rgba(2, 2, 3, 0.94)');
+    body.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(-7, 6);
+    ctx.quadraticCurveTo(-10, -14, -4, -26);
+    ctx.quadraticCurveTo(0, -31, 4, -26);
+    ctx.quadraticCurveTo(10, -14, 7, 6);
+    ctx.lineTo(2, 2);
+    ctx.lineTo(-1, 7);
+    ctx.lineTo(-4, 1);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(168, 156, 132, ${alpha * 0.3})`;
+    ctx.beginPath();
+    ctx.ellipse(0, -24, 3.6, 4.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `rgba(208, 66, 44, ${alpha * 0.5})`;
+    ctx.beginPath();
+    ctx.arc(-1.4, -24, 0.8, 0, Math.PI * 2);
+    ctx.arc(1.4, -24, 0.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  private makeFog(): void {
+    const fog = document.createElement('canvas');
+    fog.width = 256;
+    fog.height = 256;
+    const fctx = fog.getContext('2d');
+    if (!fctx) return;
+    for (let i = 0; i < 46; i++) {
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      const r = 18 + Math.random() * 60;
+      const g = fctx.createRadialGradient(x, y, 0, x, y, r);
+      g.addColorStop(0, `rgba(180, 190, 186, ${0.03 + Math.random() * 0.055})`);
+      g.addColorStop(1, 'rgba(180, 190, 186, 0)');
+      fctx.fillStyle = g;
+      fctx.fillRect(x - r, y - r, r * 2, r * 2);
+    }
+    this.fogPattern = this.ctx.createPattern(fog, 'repeat');
+  }
+
+  private drawFog(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+    if (!this.fogPattern) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const drift = this.reducedFx ? 0 : this.time;
+    const ox = (-this.cam.x * 0.35 - drift * 7) % 256;
+    const oy = (-this.cam.y * 0.35 + drift * 3) % 256;
+    ctx.globalAlpha = 0.055;
+    ctx.translate(ox, oy);
+    ctx.fillStyle = this.fogPattern;
+    ctx.fillRect(0, 0, w + 256, h + 256);
+    ctx.globalAlpha = 0.035;
+    ctx.translate(48, 96);
+    ctx.fillRect(0, 0, w + 256, h + 256);
+    ctx.restore();
   }
 
   private drawStairs(ctx: CanvasRenderingContext2D): void {
@@ -2211,7 +2714,8 @@ export class Game {
     ctx.save();
     ctx.translate(px + Math.cos(facing) * lunge, py + Math.sin(facing) * lunge);
     ctx.rotate(facing + Math.PI / 2 + twitch);
-    ctx.scale(1.1, 1.1);
+    const breathe = 1 + Math.sin(monster.phase * 1.7 + monster.x) * 0.018;
+    ctx.scale(1.1 * breathe, 1.1 / breathe);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -2442,6 +2946,34 @@ export class Game {
       ctx.fill();
       ctx.globalAlpha = 1;
     }
+
+    // Wet skin and eyeshine: the only parts of it the torch can really hold.
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const sheen = ctx.createRadialGradient(-4, -8, 1, -4, -8, 22);
+    sheen.addColorStop(0, 'rgba(226, 205, 170, 0.13)');
+    sheen.addColorStop(0.55, 'rgba(190, 150, 110, 0.035)');
+    sheen.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = sheen;
+    ctx.beginPath();
+    ctx.ellipse(-3, -7, 13, 18, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    if (monster.kind !== 'crawler') {
+      const eyeY = monster.kind === 'wailer' ? -12 : -19;
+      const eyeX = monster.kind === 'wailer' ? 2.4 : 1.9;
+      const glint = 0.4 + Math.sin(this.time * 7.3 + monster.phase * 3) * 0.22;
+      ctx.fillStyle = `rgba(255, 244, 220, ${glint * (hunting ? 0.85 : 0.45)})`;
+      ctx.shadowColor = 'rgba(255, 220, 180, 0.75)';
+      ctx.shadowBlur = 4;
+      ctx.beginPath();
+      ctx.arc(-eyeX, eyeY, 0.55, 0, Math.PI * 2);
+      ctx.arc(eyeX, eyeY, 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
     ctx.restore();
   }
 
@@ -2456,113 +2988,234 @@ export class Game {
     const h = this.cssH;
     lc.setTransform(1, 0, 0, 1, 0, 0);
     lc.clearRect(0, 0, w, h);
-    lc.fillStyle = 'rgba(2, 2, 3, 0.86)';
+    lc.fillStyle = 'rgba(2, 2, 3, 0.91)';
     lc.fillRect(0, 0, w, h);
     lc.globalCompositeOperation = 'destination-out';
 
-    const px = view.x * TILE - camX;
-    const py = view.y * TILE - camY;
+    const sway = this.reducedFx ? 0 : 1;
+    const px = view.x * TILE - camX + Math.sin(this.time * 1.9) * 0.8 * sway;
+    const py = view.y * TILE - camY + Math.cos(this.time * 1.5) * 0.6 * sway;
     const lightOn = !this.player.dead && this.player.flashlight && this.player.battery > 0;
+    const low = this.player.battery < 18;
+    const lowDip = low
+      ? Math.max(0, Math.sin(this.time * 7.9)) ** 3 * Math.max(0, Math.sin(this.time * 29.3)) * -0.24
+      : 0;
+    const dreadShiver = this.player.dread > 72 ? Math.sin(this.time * 23.7) * 0.04 : 0;
     const flicker = this.reducedFx
-      ? 0.9
-      : 0.82 +
-        Math.sin(this.time * 10.7) * 0.045 +
-        Math.sin(this.time * 26.3) * 0.03 +
-        (this.player.dread > 72 ? Math.random() * 0.14 : 0);
-    const radius = (lightOn ? 11.5 : 3.8) * TILE * flicker;
+      ? 0.92
+      : clamp(
+          0.85 +
+            Math.sin(this.time * 10.7) * 0.045 +
+            Math.sin(this.time * 26.3) * 0.025 +
+            lowDip +
+            dreadShiver,
+          0.45,
+          1.05
+        );
+    const radius = (lightOn ? 14 : 4) * TILE * flicker;
+    const halfAngle = 0.7;
+    const facing = this.player.facing;
 
-    // Close, soft fill light. The world is only half-remembered beyond this.
-    const ambient = lc.createRadialGradient(px, py, 0, px, py, radius);
-    ambient.addColorStop(0, 'rgba(255,255,255,1)');
-    ambient.addColorStop(0.42, 'rgba(255,255,255,0.97)');
-    ambient.addColorStop(0.72, 'rgba(255,255,255,0.72)');
-    ambient.addColorStop(1, 'rgba(255,255,255,0)');
-    lc.fillStyle = ambient;
-    lc.fillRect(0, 0, w, h);
+    // Cut holes in the dark. Clip to a polygon traced by rays that stop at
+    // masonry, so light never leaks through a wall.
+    const hole = (
+      points: Array<[number, number]>,
+      radiusPx: number,
+      stops: Array<[number, number]>
+    ): void => {
+      if (points.length < 2) return;
+      lc.save();
+      lc.beginPath();
+      lc.moveTo(points[0]![0] - camX, points[0]![1] - camY);
+      for (let i = 1; i < points.length; i++) {
+        lc.lineTo(points[i]![0] - camX, points[i]![1] - camY);
+      }
+      lc.closePath();
+      lc.clip();
+      const g = lc.createRadialGradient(px, py, 0, px, py, Math.max(1, radiusPx));
+      for (const [at, alpha] of stops) g.addColorStop(at, `rgba(255,255,255,${alpha})`);
+      lc.fillStyle = g;
+      lc.fillRect(0, 0, w, h);
+      lc.restore();
+    };
+
+    // Your own presence: close, unsteady, hemmed in by stone.
+    const ambientPoints = this.lightPolygon(view, 2.8, 0, Math.PI * 2, 64);
+    hole(ambientPoints, 2.8 * TILE, [[0, 0.9], [0.45, 0.72], [0.78, 0.32], [1, 0]]);
 
     if (lightOn) {
-      const beam = (halfAngle: number, length: number, alpha: number): void => {
-        const beamRadius = radius * length;
-        lc.save();
-        lc.beginPath();
-        lc.moveTo(px, py);
-        lc.arc(px, py, beamRadius, this.player.facing - halfAngle, this.player.facing + halfAngle);
-        lc.closePath();
-        lc.clip();
-        const cone = lc.createRadialGradient(px, py, 0, px, py, beamRadius);
-        cone.addColorStop(0, `rgba(255,255,255,${alpha})`);
-        cone.addColorStop(0.34, `rgba(255,255,255,${alpha * 0.92})`);
-        cone.addColorStop(0.7, `rgba(255,255,255,${alpha * 0.48})`);
-        cone.addColorStop(1, 'rgba(255,255,255,0)');
-        lc.fillStyle = cone;
-        lc.fillRect(px - beamRadius, py - beamRadius, beamRadius * 2, beamRadius * 2);
-        lc.restore();
-      };
-      beam(0.76, 1.34, 0.24);
-      beam(0.54, 1.62, 0.46);
-      beam(0.34, 1.95, 0.84);
+      const beamPoints = this.lightPolygon(
+        view,
+        14 * flicker,
+        facing - halfAngle,
+        facing + halfAngle,
+        72
+      );
+      hole(beamPoints, radius, [[0, 1], [0.28, 0.99], [0.56, 0.84], [0.82, 0.42], [1, 0]]);
+      // A wider, weaker wash makes the edge of the cone feel like air.
+      const spillPoints = this.lightPolygon(
+        view,
+        10.5 * flicker,
+        facing - 1.08,
+        facing + 1.08,
+        56
+      );
+      hole(spillPoints, 10.5 * TILE, [[0, 0.36], [0.5, 0.2], [1, 0]]);
+    }
 
-      // A little spill below the lens, so the floor at your feet is readable.
-      const spill = lc.createRadialGradient(px, py, 0, px, py, radius * 0.5);
-      spill.addColorStop(0, 'rgba(255,255,255,0.5)');
-      spill.addColorStop(1, 'rgba(255,255,255,0)');
-      lc.fillStyle = spill;
-      lc.fillRect(px - radius, py - radius, radius * 2, radius * 2);
+    // Candles are the only warm thing left down here.
+    for (const candle of this.dungeon.candles) {
+      const tx = Math.floor(candle.x);
+      const ty = Math.floor(candle.y);
+      if (!this.explored[ty * this.dungeon.w + tx]) continue;
+      const flick =
+        0.72 +
+        Math.sin(this.time * 9.3 + candle.phase) * 0.16 +
+        Math.sin(this.time * 21.7 + candle.phase) * 0.08;
+      const cx = candle.x * TILE - camX;
+      const cy = candle.y * TILE - camY;
+      const r = 46 * flick;
+      const g = lc.createRadialGradient(cx, cy, 1, cx, cy, r);
+      g.addColorStop(0, `rgba(255,255,255,${0.55 * flick})`);
+      g.addColorStop(0.5, `rgba(255,255,255,${0.22 * flick})`);
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      lc.fillStyle = g;
+      lc.fillRect(cx - r, cy - r, r * 2, r * 2);
+    }
+
+    // Partners carry their own light into the room.
+    if (this.multiplayer) {
+      for (const remote of this.remote.values()) {
+        if (remote.dead || !remote.flashlight) continue;
+        if (!this.isVisibleAt(remote.x, remote.y)) continue;
+        const r = 4.2 * TILE;
+        const cx = remote.x * TILE - camX;
+        const cy = remote.y * TILE - camY;
+        const g = lc.createRadialGradient(cx, cy, 0, cx, cy, r);
+        g.addColorStop(0, 'rgba(255,255,255,0.52)');
+        g.addColorStop(0.5, 'rgba(255,255,255,0.3)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        lc.fillStyle = g;
+        lc.fillRect(cx - r, cy - r, r * 2, r * 2);
+      }
     }
 
     lc.globalCompositeOperation = 'source-over';
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.drawImage(this.lightCanvas, 0, 0, w, h);
 
+    // Colour the light: warm through the lens, cold at the edges of the beam.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    ctx.beginPath();
+    ctx.moveTo(ambientPoints[0]![0] - camX, ambientPoints[0]![1] - camY);
+    for (let i = 1; i < ambientPoints.length; i++) {
+      ctx.lineTo(ambientPoints[i]![0] - camX, ambientPoints[i]![1] - camY);
+    }
+    ctx.closePath();
+    ctx.clip();
     const warm = ctx.createRadialGradient(px, py, 0, px, py, radius * 0.95);
-    warm.addColorStop(0, lightOn ? 'rgba(255, 204, 136, 0.16)' : 'rgba(143, 164, 198, 0.035)');
-    warm.addColorStop(0.5, lightOn ? 'rgba(227, 166, 102, 0.06)' : 'rgba(100, 120, 150, 0.015)');
+    warm.addColorStop(0, lightOn ? 'rgba(255, 206, 142, 0.2)' : 'rgba(128, 150, 184, 0.03)');
+    warm.addColorStop(0.5, lightOn ? 'rgba(225, 160, 96, 0.06)' : 'rgba(90, 110, 140, 0.012)');
     warm.addColorStop(1, 'rgba(0, 0, 0, 0)');
     ctx.fillStyle = warm;
     ctx.beginPath();
     ctx.arc(px, py, radius * 0.95, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     if (lightOn) {
-      // Add a directional wash on top of the cut-out so the cone reads on
-      // the dark masonry instead of only lifting the player's feet.
-      const beamLength = radius * 1.45;
+      const beamPoints = this.lightPolygon(
+        view,
+        14 * flicker,
+        facing - halfAngle,
+        facing + halfAngle,
+        72
+      );
       ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
       ctx.beginPath();
-      ctx.moveTo(px, py);
-      ctx.arc(px, py, beamLength, this.player.facing - 0.34, this.player.facing + 0.34);
+      ctx.moveTo(beamPoints[0]![0] - camX, beamPoints[0]![1] - camY);
+      for (let i = 1; i < beamPoints.length; i++) {
+        ctx.lineTo(beamPoints[i]![0] - camX, beamPoints[i]![1] - camY);
+      }
       ctx.closePath();
       ctx.clip();
-      const beamGlow = ctx.createRadialGradient(px, py, 0, px, py, beamLength);
-      beamGlow.addColorStop(0, 'rgba(255, 210, 150, 0.02)');
-      beamGlow.addColorStop(0.18, 'rgba(255, 205, 145, 0.14)');
-      beamGlow.addColorStop(0.55, 'rgba(255, 185, 115, 0.07)');
+      const beamGlow = ctx.createRadialGradient(px, py, 0, px, py, radius);
+      beamGlow.addColorStop(0, 'rgba(255, 216, 164, 0.035)');
+      beamGlow.addColorStop(0.2, 'rgba(255, 208, 150, 0.17)');
+      beamGlow.addColorStop(0.6, 'rgba(255, 185, 118, 0.07)');
       beamGlow.addColorStop(1, 'rgba(255, 170, 100, 0)');
       ctx.fillStyle = beamGlow;
-      ctx.fillRect(px - beamLength, py - beamLength, beamLength * 2, beamLength * 2);
+      ctx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
+      // The wall the beam ends on catches a thin warm rim.
+      ctx.strokeStyle = 'rgba(255, 190, 126, 0.12)';
+      ctx.lineWidth = 2.4;
+      ctx.stroke();
       ctx.restore();
+    }
 
-      const poolX = px + Math.cos(this.player.facing) * radius * 0.85;
-      const poolY = py + Math.sin(this.player.facing) * radius * 0.85;
-      const pool = ctx.createRadialGradient(poolX, poolY, 0, poolX, poolY, radius * 0.56);
-      pool.addColorStop(0, 'rgba(255, 205, 145, 0.08)');
-      pool.addColorStop(1, 'rgba(255, 185, 115, 0)');
-      ctx.fillStyle = pool;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const candle of this.dungeon.candles) {
+      const tx = Math.floor(candle.x);
+      const ty = Math.floor(candle.y);
+      if (!this.explored[ty * this.dungeon.w + tx]) continue;
+      const flick =
+        0.72 +
+        Math.sin(this.time * 9.3 + candle.phase) * 0.16 +
+        Math.sin(this.time * 21.7 + candle.phase) * 0.08;
+      const cx = candle.x * TILE - camX;
+      const cy = candle.y * TILE - camY;
+      const r = 74 * flick;
+      const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+      g.addColorStop(0, `rgba(255, 180, 92, ${0.16 * flick})`);
+      g.addColorStop(0.5, `rgba(235, 145, 70, ${0.05 * flick})`);
+      g.addColorStop(1, 'rgba(200, 120, 60, 0)');
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(poolX, poolY, radius * 0.56, 0, Math.PI * 2);
-      ctx.fill();
-
-      const lens = ctx.createRadialGradient(px, py, 0, px, py, 68);
-      lens.addColorStop(0, 'rgba(255, 228, 178, 0.09)');
-      lens.addColorStop(1, 'rgba(255, 228, 178, 0)');
-      ctx.fillStyle = lens;
-      ctx.beginPath();
-      ctx.arc(px, py, 68, 0, Math.PI * 2);
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
+  }
+
+  /** Cast a fan of rays to the first wall so light cannot bleed through stone. */
+  private lightPolygon(
+    view: Vec,
+    radius: number,
+    from: number,
+    to: number,
+    rays: number
+  ): Array<[number, number]> {
+    const points: Array<[number, number]> = [];
+    for (let i = 0; i <= rays; i++) {
+      const angle = from + ((to - from) * i) / rays;
+      const hit = this.castRay(view.x, view.y, angle, radius);
+      points.push([hit.x * TILE, hit.y * TILE]);
+    }
+    return points;
+  }
+
+  private castRay(x: number, y: number, angle: number, maxDist: number): Vec {
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const step = 0.16;
+    const w = this.dungeon.w;
+    const h = this.dungeon.h;
+    for (let d = step; d <= maxDist; d += step) {
+      const tx = Math.floor(x + dx * d);
+      const ty = Math.floor(y + dy * d);
+      if (tx < 0 || ty < 0 || tx >= w || ty >= h) {
+        return { x: x + dx * (d - step), y: y + dy * (d - step) };
+      }
+      if (this.dungeon.tiles[ty * w + tx] === WALL) {
+        // Carry a little way into the masonry so the wall face itself catches
+        // the light instead of ending at a black silhouette.
+        return { x: x + dx * (d + 0.3), y: y + dy * (d + 0.3) };
+      }
+    }
+    return { x: x + dx * maxDist, y: y + dy * maxDist };
   }
 
   private renderScreenEffects(ctx: CanvasRenderingContext2D, w: number, h: number): void {
@@ -2609,6 +3262,13 @@ export class Game {
     vignette.addColorStop(1, 'rgba(0,0,0,0.88)');
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, w, h);
+
+    // When the shape is in the beam, the edges of the world close in.
+    if (this.ghost) {
+      const p = Math.min(1, this.ghost.t / this.ghost.life);
+      ctx.fillStyle = `rgba(0, 0, 0, ${Math.sin(p * Math.PI) * 0.16})`;
+      ctx.fillRect(0, 0, w, h);
+    }
 
     if (lowHp) {
       const pulse = 0.14 + Math.sin(this.time * 4) * 0.06;

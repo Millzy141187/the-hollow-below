@@ -31,6 +31,15 @@ export interface Candle {
   phase: number;
 }
 
+/** Something written on the masonry in something that is not paint. */
+export interface Scrawl {
+  x: number;
+  y: number;
+  rot: number;
+  text: string;
+  alpha: number;
+}
+
 export interface Dungeon {
   w: number;
   h: number;
@@ -41,6 +50,7 @@ export interface Dungeon {
   pickups: Pickup[];
   decals: Decal[];
   candles: Candle[];
+  scrawls: Scrawl[];
   spawnPoints: Vec[];
 }
 
@@ -219,32 +229,99 @@ export function generateDungeon(seed: number, floor: number): Dungeon {
   makePickup('battery', supportRooms[2] ?? stairsRoom, 12);
   makePickup('battery', supportRooms[3] ?? spawnRoom, 13);
 
+  // 0 stain · 1 blood · 2 drag mark · 3 bones · 4 cobweb · 5 rubble · 6 puddle · 7 scratches
   const decals: Decal[] = [];
   for (const r of rooms) {
-    const count = 2 + Math.floor(rand() * 4);
+    const count = 3 + Math.floor(rand() * 5);
     for (let i = 0; i < count; i++) {
       const x = r.x + 0.6 + rand() * Math.max(0.5, r.w - 1.2);
       const y = r.y + 0.6 + rand() * Math.max(0.5, r.h - 1.2);
+      const roll = rand();
+      const kind = roll < 0.34 ? 0 : roll < 0.47 ? 1 : roll < 0.57 ? 2 : roll < 0.67 ? 3 : roll < 0.82 ? 5 : roll < 0.94 ? 6 : 7;
       decals.push({
         x,
         y,
         r: 0.18 + rand() * 0.5,
         rot: rand() * Math.PI * 2,
-        kind: rand() < 0.72 ? 0 : rand() < 0.5 ? 1 : 2,
+        kind,
         alpha: 0.18 + rand() * 0.35,
       });
+    }
+    // Cobwebs live in the corners, where nobody has swept for a long time.
+    if (rand() < 0.6) {
+      decals.push({ x: r.x + 0.15, y: r.y + 0.15, r: 0.55, rot: rand() * Math.PI, kind: 4, alpha: 0.22 });
+      if (rand() < 0.5) {
+        decals.push({ x: r.x + r.w - 0.15, y: r.y + 0.15, r: 0.55, rot: rand() * Math.PI, kind: 4, alpha: 0.2 });
+      }
     }
   }
 
   const candles: Candle[] = [];
   for (const r of rooms) {
-    if (rand() < 0.55) {
+    if (rand() < 0.62) {
       candles.push({
         x: r.x + 0.7 + rand() * Math.max(0.4, r.w - 1.4),
         y: r.y + 0.7 + rand() * Math.max(0.4, r.h - 1.4),
         phase: rand() * Math.PI * 2,
       });
+      if (rand() < 0.28) {
+        candles.push({
+          x: r.x + 0.7 + rand() * Math.max(0.4, r.w - 1.4),
+          y: r.y + 0.7 + rand() * Math.max(0.4, r.h - 1.4),
+          phase: rand() * Math.PI * 2,
+        });
+      }
     }
+  }
+
+  const scrawlText = [
+    'IT HEARS THE LIGHT',
+    'DONT LOOK BACK',
+    'TURN BACK',
+    'THEY ARE STILL HERE',
+    '3 FUSES 3 OF US',
+    'DONT SPLIT UP',
+    'IT WEARS FACES',
+    'THE STAIRS LIE',
+    'KEEP THE LIGHT ON',
+    'WE TRIED',
+    'IIIII IIIII I',
+    'NOBODY CAME',
+  ];
+  const scrawls: Scrawl[] = [];
+  const scrawlRounds = 2 + Math.floor(rand() * 3);
+  for (let i = 0; i < scrawlRounds; i++) {
+    const room = rooms[Math.floor(rand() * rooms.length)];
+    if (!room) continue;
+    const side = Math.floor(rand() * 4);
+    let x = 0;
+    let y = 0;
+    let rot = 0;
+    if (side === 0) {
+      x = (room.x + 0.5 + rand() * Math.max(0.5, room.w - 1));
+      y = (room.y - 0.55);
+      rot = 0;
+    } else if (side === 1) {
+      x = (room.x + room.w + 0.45);
+      y = (room.y + 0.5 + rand() * Math.max(0.5, room.h - 1));
+      rot = Math.PI / 2;
+    } else if (side === 2) {
+      x = (room.x + 0.5 + rand() * Math.max(0.5, room.w - 1));
+      y = (room.y + room.h + 0.45);
+      rot = 0;
+    } else {
+      x = (room.x - 0.55);
+      y = (room.y + 0.5 + rand() * Math.max(0.5, room.h - 1));
+      rot = Math.PI / 2;
+    }
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    scrawls.push({
+      x,
+      y,
+      rot,
+      text: scrawlText[Math.floor(rand() * scrawlText.length)] ?? 'TURN BACK',
+      alpha: 0.16 + rand() * 0.2,
+    });
   }
 
   const spawnPoints: Vec[] = [];
@@ -258,5 +335,5 @@ export function generateDungeon(seed: number, floor: number): Dungeon {
   }
   if (spawnPoints.length === 0) spawnPoints.push({ x: spawn.x + 2, y: spawn.y });
 
-  return { w, h, tiles, rooms, spawn, stairs, pickups, decals, candles, spawnPoints };
+  return { w, h, tiles, rooms, spawn, stairs, pickups, decals, candles, scrawls, spawnPoints };
 }
