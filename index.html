@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070607" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23080707'/%3E%3Cpath d='M10 40c6-18 38-18 44 0' stroke='%23a9382f' stroke-width='3' fill='none'/%3E%3Ccircle cx='32' cy='34' r='7' fill='%23d24a3a'/%3E%3Ccircle cx='32' cy='34' r='2.5' fill='%23080707'/%3E%3C/svg%3E"
+    />
+    <meta
+      name="description"
+      content="THE HOLLOW BELOW — a co-operative 2D roguelike horror descent for 15+. Play alone or descend with others."
+    />
+    <title>THE HOLLOW BELOW — a co-operative horror descent</title>
+  </head>
+  <body>
+    <div id="app">
+      <!-- ── Menu ─────────────────────────────────────────────── -->
+      <main id="menu" class="screen menu-screen">
+        <div class="fog fog-a" aria-hidden="true"></div>
+        <div class="fog fog-b" aria-hidden="true"></div>
+        <div class="grain" aria-hidden="true"></div>
+
+        <div class="menu-inner">
+          <header class="masthead">
+            <p class="eyebrow">A co-operative descent · 15+</p>
+            <h1>THE HOLLOW<br /><em>BELOW</em></h1>
+            <p class="tagline">
+              The dark is not empty. Neither are you — if you bring someone.
+            </p>
+          </header>
+
+          <section class="panel" aria-labelledby="enter-title">
+            <h2 id="enter-title" class="panel-title">Enter the dark</h2>
+
+            <div class="warning" role="note">
+              <div class="warning-head">
+                <span class="age-badge">15+</span>
+                <h3>Content warning</h3>
+              </div>
+              <p>
+                Depictions of blood and gore, mutilated bodies, sustained tension,
+                jump scares, sudden loud noises and flashing lights. Nothing here
+                is real. Everything here is waiting.
+              </p>
+              <label class="check">
+                <input type="checkbox" id="age-check" />
+                <span>I am 15 or older and understand what this game contains.</span>
+              </label>
+              <label class="check check-sm">
+                <input type="checkbox" id="fx-check" />
+                <span>Reduce flashing lights and screen shake</span>
+              </label>
+            </div>
+
+            <div class="field">
+              <label for="name">Name in the dark</label>
+              <input
+                id="name"
+                type="text"
+                maxlength="14"
+                autocomplete="nickname"
+                placeholder="Wanderer"
+                spellcheck="false"
+              />
+            </div>
+
+            <div class="modes">
+              <button id="btn-solo" class="btn btn-primary" type="button" disabled>
+                <span class="btn-title">Descend alone</span>
+                <span class="btn-sub">Offline · no account needed</span>
+              </button>
+              <button id="btn-host" class="btn" type="button" disabled>
+                <span class="btn-title">Create co-op room</span>
+                <span class="btn-sub">Invite others with a room code</span>
+              </button>
+              <div class="join-row">
+                <input
+                  id="join-code"
+                  type="text"
+                  maxlength="6"
+                  placeholder="ROOM CODE"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-label="Room code"
+                />
+                <button id="btn-join" class="btn btn-join" type="button" disabled>
+                  Join
+                </button>
+              </div>
+            </div>
+
+            <p id="mp-status" class="mp-status" role="status"></p>
+            <button id="btn-setup" class="linkish" type="button">
+              Multiplayer setup — connect Supabase
+            </button>
+
+            <details class="howto">
+              <summary>How to survive</summary>
+              <p class="howto-intro">
+                Recover <strong>three fuses</strong> from the dark, then reach the
+                stairwell. Every descent is procedurally different. Stay together —
+                the light is thin and the things below can hear you.
+              </p>
+              <div class="keys">
+                <span><kbd>WASD</kbd> move</span>
+                <span><kbd>Shift</kbd> sprint</span>
+                <span><kbd>Mouse</kbd> aim</span>
+                <span><kbd>LMB</kbd>/<kbd>Space</kbd> strike</span>
+                <span><kbd>F</kbd> flashlight</span>
+                <span><kbd>E</kbd> interact</span>
+                <span><kbd>Esc</kbd> pause</span>
+                <span><kbd>M</kbd> mute</span>
+              </div>
+            </details>
+          </section>
+
+          <footer class="menu-foot">
+            <span>15+ · Headphones recommended</span>
+            <span>Runs in your browser · No install</span>
+            <span>Multiplayer via your Supabase</span>
+          </footer>
+        </div>
+      </main>
+
+      <!-- ── Supabase setup ───────────────────────────────────── -->
+      <div id="setup" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="setup-title">
+        <div class="modal-card">
+          <h2 id="setup-title">Connect your Supabase</h2>
+          <p>
+            Multiplayer uses Supabase Realtime. Paste your project URL and its
+            <strong>publishable / anon</strong> key. Only the public key belongs in a
+            browser — never a <code>service_role</code> secret.
+          </p>
+          <label class="field">
+            <span>Project URL</span>
+            <input id="sb-url" type="url" placeholder="https://your-project.supabase.co" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span>Publishable / anon key</span>
+            <input id="sb-key" type="password" placeholder="eyJhbGciOi… or sb_publishable_…" spellcheck="false" />
+          </label>
+          <p class="fine">
+            Stored only in this browser. No tables or SQL are required — rooms use
+            Realtime broadcast and presence. You must enable Realtime in your
+            Supabase project settings.
+          </p>
+          <p id="setup-msg" class="setup-msg" role="status"></p>
+          <div class="modal-actions">
+            <button id="setup-save" class="btn btn-primary" type="button">Save &amp; test</button>
+            <button id="setup-close" class="btn btn-ghost" type="button">Close</button>
+            <button id="setup-clear" class="linkish danger" type="button">Remove saved keys</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Connecting overlay ───────────────────────────────── -->
+      <div id="connecting" class="modal hidden" role="dialog" aria-modal="true" aria-live="polite">
+        <div class="modal-card connecting-card">
+          <div class="sigil" aria-hidden="true"></div>
+          <h2 id="connecting-text">Opening a way down…</h2>
+          <p id="connecting-sub">Listening for other footsteps.</p>
+          <button id="connecting-cancel" class="btn btn-ghost" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <!-- ── Game ─────────────────────────────────────────────── -->
+      <section id="game" class="hidden" aria-label="The Hollow Below">
+        <canvas id="game-canvas"></canvas>
+
+        <div id="hud" class="hud">
+          <div class="hud-top">
+            <div class="depth-block">
+              <span class="micro">DEPTH</span>
+              <span id="floor-num" class="depth-num">01</span>
+              <span id="objective" class="objective">Recover the three fuses · 0/3</span>
+            </div>
+            <div class="party-block">
+              <div class="room-line">
+                <span id="room-code" class="room-code"></span>
+                <span id="net-status" class="net-status">
+                  <i class="dot"></i><span id="net-text">SOLO</span>
+                </span>
+              </div>
+              <div id="party" class="party"></div>
+            </div>
+          </div>
+
+          <div class="hud-bottom">
+            <div class="vitals">
+              <div class="vital">
+                <div class="vital-head"><span>VITALS</span><span id="hp-text">100</span></div>
+                <div class="track"><i id="hp-fill" class="fill hp-fill"></i></div>
+              </div>
+              <div class="vital">
+                <div class="vital-head"><span>BREATH</span></div>
+                <div class="track"><i id="stamina-fill" class="fill stamina-fill"></i></div>
+              </div>
+              <div class="vital">
+                <div class="vital-head"><span>LIGHT</span><span id="battery-text">100%</span></div>
+                <div class="track"><i id="battery-fill" class="fill battery-fill"></i></div>
+              </div>
+              <div class="vital">
+                <div class="vital-head"><span>DREAD</span></div>
+                <div class="track"><i id="dread-fill" class="fill dread-fill"></i></div>
+              </div>
+            </div>
+            <p id="controls-hint" class="controls-hint">
+              WASD move · Shift sprint · Mouse aim · LMB strike · F light · E use
+            </p>
+          </div>
+
+          <div id="prompt" class="prompt hidden"><kbd>E</kbd><span></span></div>
+          <div id="toasts" class="toasts" aria-live="polite"></div>
+          <div id="death-banner" class="death-banner hidden">
+            <strong>YOU ARE DEAD</strong>
+            <span>Your body joins the hollow. Watch your companions.</span>
+          </div>
+
+          <div id="descend" class="descend hidden">
+            <span class="micro">THE FLOOR GIVES WAY</span>
+            <strong id="descend-count">4</strong>
+            <span class="descend-sub">Stay close. It gets darker from here.</span>
+          </div>
+
+          <div class="hud-buttons">
+            <button id="mute-btn" class="icon-btn" type="button" aria-label="Mute audio" title="Mute (M)">♪</button>
+            <button id="pause-btn" class="icon-btn" type="button" aria-label="Pause" title="Pause (Esc)">❚❚</button>
+          </div>
+        </div>
+
+        <!-- Pause -->
+        <div id="pause" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+          <div class="modal-card compact">
+            <h2 id="pause-title">Hold your breath</h2>
+            <p class="fine">The hollow waits while you are paused.</p>
+            <div class="modal-actions column">
+              <button id="btn-resume" class="btn btn-primary" type="button">Keep going</button>
+              <button id="btn-mute" class="btn btn-ghost" type="button">Toggle audio</button>
+              <button id="btn-leave" class="btn btn-ghost danger" type="button">Abandon the descent</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- End of run -->
+        <div id="end" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="end-title">
+          <div class="modal-card end-card">
+            <p class="eyebrow">THE DESCENT ENDS</p>
+            <h2 id="end-title">You are lost</h2>
+            <p id="end-cause" class="end-cause">The dark took you.</p>
+            <div id="end-stats" class="end-stats"></div>
+            <div class="modal-actions column">
+              <button id="btn-again" class="btn btn-primary" type="button">Descend again</button>
+              <button id="btn-menu" class="btn btn-ghost" type="button">Return to the surface</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
