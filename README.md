@@ -4,8 +4,11 @@ A co-operative 2D roguelike horror game for **15+**. Descend procedurally genera
 catacombs alone or with a party, recover three fuses, and reach the stairwell before
 the things in the dark find you.
 
-Built with TypeScript, Canvas 2D and **your own Supabase project** for realtime
-co-op (broadcast + presence; no database tables required).
+Built with TypeScript, Canvas 2D and **Supabase Realtime** for co-op
+(broadcast + presence; no database tables required).
+
+**Live:** <https://the-hollow-below.vercel.app>  
+**Source:** <https://github.com/Millzy141187/the-hollow-below>
 
 ---
 
@@ -48,8 +51,13 @@ Desktop browser with a keyboard and mouse is recommended.
 
 ## Connect your Supabase (multiplayer)
 
-You only need the **public anon / publishable key**. Never put a `service_role`
-secret in a browser game.
+The deployed build is already configured with a public Supabase project in
+`src/config.ts`, so **Create co-op room** works immediately on the live site — no
+setup required. The in-game setup panel can still override it with a different
+project; settings saved in that browser win over the build defaults.
+
+If you are connecting a different project, you only need its **public anon /
+publishable key**. Never put a `service_role` secret in a browser game.
 
 1. Open your project at [supabase.com/dashboard](https://supabase.com/dashboard)
    (for example `Afterdark-the-last-frontier` or `spoolora`).
@@ -73,9 +81,9 @@ VITE_SUPABASE_URL=https://YOUR-PROJECT-REF.supabase.co
 VITE_SUPABASE_ANON_KEY=YOUR-PUBLIC-ANON-KEY
 ```
 
-Build-time values are used only when no saved in-game setup exists. For a public
-deployment, consider using the in-game setup instead so the key is not baked into
-the bundle (either way it is a public key).
+`src/config.ts` holds the built-in defaults. `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_ANON_KEY` override them for a custom build, and a saved in-game
+setup overrides both. Only the public anon/publishable key belongs in a browser.
 
 ## How to play
 
@@ -123,6 +131,7 @@ is mostly a warning, and it makes the screen less stable.
 
 ```
 src/main.ts          menu, age gate, Supabase setup, room lifecycle, HUD, end screen
+src/config.ts        public Supabase project defaults baked into the client
 src/net.ts           Supabase Realtime channel: broadcast messages + presence roster
 src/game/game.ts     game loop, lighting, AI, combat, floors, rendering, host sync
 src/game/dungeon.ts  seeded dungeon generation, collision and line of sight

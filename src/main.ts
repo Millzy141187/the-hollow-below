@@ -2,6 +2,7 @@ import './style.css';
 import { Game } from './game/game';
 import { GameAudio } from './game/audio';
 import { Net, type NetStatus } from './net';
+import { DEFAULT_SUPABASE_ANON_KEY, DEFAULT_SUPABASE_URL } from './config';
 import type { GameResult, HudState, PartyMember, PeerPresence } from './types';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string): T => {
@@ -199,8 +200,8 @@ function loadConfig(): SupabaseConfig | null {
   } catch {
     /* fall through to build-time env */
   }
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const url = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const key = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   if (url && key && isConfig({ url, key })) {
     return { url: String(url).replace(/\/+$/, ''), key: String(key) };
   }
