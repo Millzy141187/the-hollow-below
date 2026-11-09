@@ -1099,6 +1099,24 @@ kbd {
   background: linear-gradient(90deg, #4d3b51, #8c5172);
 }
 
+.vital.dread-high .dread-fill {
+  background: linear-gradient(90deg, #7d3e4d, #c0525f);
+  box-shadow: 0 0 10px rgba(192, 82, 95, 0.45);
+}
+
+.vital.dread-high .vital-head span:last-child {
+  color: #d99a8c;
+}
+
+.vital.dread-panic .dread-fill {
+  background: #d24a3a;
+  animation: dread-panic 0.7s infinite;
+}
+
+@keyframes dread-panic {
+  50% { opacity: 0.5; }
+}
+
 .vital.low .hp-fill {
   background: #d84a38;
   animation: low-pulse 0.9s infinite;

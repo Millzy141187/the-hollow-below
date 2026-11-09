@@ -195,6 +195,7 @@ export class Game {
   private whisperClock = 38;
   private unseenClock = 18;
   private unseenCd = 0;
+  private panicCd = 0;
 
   private peers: PeerPresence[] = [];
   private hostId = '';
@@ -757,6 +758,7 @@ export class Game {
       alpha: 0.5,
     });
     this.audio.monsterDie();
+    this.player.dread = Math.max(0, this.player.dread - 10);
     this.shake = Math.min(1, this.shake + 0.16);
     if (this.isHost && this.multiplayer) this.sendMonsters();
   }
@@ -869,6 +871,7 @@ export class Game {
         this.player.battery = Math.min(100, this.player.battery + 60);
         this.hooks.toast('Battery cell fitted. +60% light.', 'info');
       }
+      this.player.dread = Math.max(0, this.player.dread - (kind === 'fuse' ? 18 : 12));
       this.audio.pickup();
     }
     if (kind === 'fuse') {
@@ -927,6 +930,7 @@ export class Game {
     this.whisperClock = 38;
     this.unseenClock = 18;
     this.unseenCd = 0;
+    this.panicCd = 0;
     this.audio.setStalk(0, 0, 'stalker');
     this.ambientClock = 5;
     this.dripClock = 1.6;
@@ -1065,8 +1069,11 @@ export class Game {
       }
       if (!target) continue;
 
+      const dreadSight =
+        target.id === this.playerId && !this.player.dead ? (this.player.dread / 100) * 2.6 : 0;
+      const sight = stats.sight + dreadSight;
       const sees =
-        targetDist < stats.sight &&
+        targetDist < sight &&
         lineOfSight(this.dungeon, monster.x, monster.y, target.x, target.y);
       if (sees) {
         if (!monster.hunt) {
@@ -1074,7 +1081,7 @@ export class Game {
         }
         monster.hunt = true;
         monster.targetId = target.id;
-      } else if (targetDist > stats.sight + 5) {
+      } else if (targetDist > sight + 5) {
         monster.hunt = false;
         monster.targetId = null;
       }
@@ -1299,12 +1306,14 @@ export class Game {
     }
     let dreadTarget = 0;
     if (!p.dead) {
-      if (nearest < 11) dreadTarget += (11 - nearest) * 5.6;
+      if (nearest < 12) dreadTarget += (12 - nearest) * 6.2;
       if (!p.flashlight) dreadTarget += 9;
       if (p.hp < 35) dreadTarget += 14;
       if (p.battery < 15) dreadTarget += 8;
     }
     p.dread = lerp(p.dread, clamp(dreadTarget, 0, 100), Math.min(1, dt * 0.5));
+    this.panicCd = Math.max(0, this.panicCd - dt);
+    if (p.dread >= 96 && this.panicCd <= 0) this.triggerDreadPanic();
 
     const tension = clamp(
       Math.max(
@@ -1595,6 +1604,24 @@ export class Game {
     this.whisperText = null;
     this.shake = Math.max(this.shake, this.reducedFx ? 0.25 : 1.05);
     this.audio.jumpScare(kind, source, pan);
+  }
+
+  private triggerDreadPanic(): void {
+    if (
+      this.jumpScare ||
+      this.player.dead ||
+      this.ended ||
+      this.deathScene ||
+      this.descendTimer > 0 ||
+      this.player.dread < 96
+    ) {
+      return;
+    }
+    this.panicCd = 20;
+    this.player.dread = 56;
+    this.audio.panic();
+    this.triggerJumpScare('wailer', 'apparition', 0.9, 0, true);
+    this.hooks.toast('PANIC — your heartbeat gives you away.', 'blood');
   }
 
   private spawnDrip(): void {
@@ -3216,7 +3243,8 @@ export class Game {
           0.45,
           1.05
         );
-    const radius = (lightOn ? FLASHLIGHT_RANGE : 4) * TILE * flicker;
+    const dreadDim = 1 - clamp((this.player.dread - 55) / 45, 0, 1) * 0.16;
+    const radius = (lightOn ? FLASHLIGHT_RANGE : 4) * TILE * flicker * dreadDim;
     const halfAngle = 0.7;
     const facing = this.player.facing;
 

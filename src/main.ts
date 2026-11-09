@@ -59,6 +59,7 @@ const staminaFill = $('#stamina-fill');
 const batteryFill = $('#battery-fill');
 const batteryText = $('#battery-text');
 const dreadFill = $('#dread-fill');
+const dreadText = $('#dread-text');
 const promptEl = $('#prompt');
 const toasts = $('#toasts');
 const descendEl = $('#descend');
@@ -740,6 +741,13 @@ function applyHud(state: HudState): void {
       ? 'DEAD'
       : 'OFF';
   setFill(dreadFill, state.dread);
+  dreadText.textContent =
+    state.dread >= 90 ? 'PANIC' : state.dread >= 65 ? 'SHAKEN' : state.dread >= 35 ? 'UNEASY' : 'CALM';
+  const dreadBar = dreadFill.parentElement?.parentElement;
+  if (dreadBar) {
+    dreadBar.classList.toggle('dread-high', state.dread >= 65);
+    dreadBar.classList.toggle('dread-panic', state.dread >= 90);
+  }
   floorNum.textContent = String(state.floor).padStart(2, '0');
   objective.textContent =
     state.fuses >= 3 ? 'The stairwell is open — descend' : `Recover the three fuses · ${state.fuses}/3`;

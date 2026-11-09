@@ -589,15 +589,25 @@ export class GameAudio {
     this.noise(0.1, 5200, soft ? 0.12 : 0.28, 'highpass', 0, undefined, pan);
     this.tone(soft ? 62 : 44, 0.6, 'sine', soft ? 0.18 : 0.32, 24, 0, pan);
     this.noise(0.48, soft ? 1700 : 1100, soft ? 0.1 : 0.16, 'bandpass', 0.02, 220, pan);
-    if (source === 'monster') {
-      this.scream(kind, pan);
-    } else {
+    // Every jump scare gets a throat behind it. The quieter sources add a
+    // thinner second shriek so they still cut through the ambience.
+    this.scream(kind, pan);
+    if (source !== 'monster') {
       this.whisper();
       this.noise(0.7, 540, 0.05, 'bandpass', 0.1, 280, -pan);
       this.tone(820, 0.2, 'sine', 0.018, 380, 0.1, pan);
+      this.tone(1260, 0.24, 'sawtooth', 0.03, 300, 0.01, pan);
     }
     this.tone(31, 1.0, 'triangle', 0.18, 20, 0.04, pan);
     this.noise(0.3, 280, 0.1, 'lowpass', 0.16, 90, pan);
+  }
+
+  /** Dread breaking: a heartbeat that fills the skull, then the bottom falls out. */
+  panic(): void {
+    this.tone(36, 0.9, 'sine', 0.26, 22);
+    this.tone(52, 0.7, 'triangle', 0.14, 30);
+    this.noise(0.85, 360, 0.08, 'lowpass', 0.02, 110);
+    this.whisper();
   }
 
   /** Ragged breathing after a sprint, also used when fear peaks. */
