@@ -8,6 +8,8 @@
  * direction. Silence is treated as a resource — the drone sits just under the
  * threshold of noticing until dread pushes it up.
  */
+import type { MonsterKind } from '../types';
+
 export class GameAudio {
   private ac: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -420,6 +422,23 @@ export class GameAudio {
     this.noise(0.55, 2400, 0.11, 'highpass', 0, 500);
     this.tone(41, 0.9, 'sine', 0.25, 26, 0.02);
     this.noise(0.7, 340, 0.09, 'lowpass', 0.05);
+  }
+
+  /** A full-body flinch: impact first, then the thing behind it. */
+  jumpScare(kind: MonsterKind, source: 'monster' | 'apparition' | 'fuse', pan = 0): void {
+    const soft = source !== 'monster';
+    this.noise(0.1, 5200, soft ? 0.12 : 0.28, 'highpass', 0, undefined, pan);
+    this.tone(soft ? 62 : 44, 0.6, 'sine', soft ? 0.18 : 0.32, 24, 0, pan);
+    this.noise(0.48, soft ? 1700 : 1100, soft ? 0.1 : 0.16, 'bandpass', 0.02, 220, pan);
+    if (source === 'monster') {
+      this.scream(kind);
+    } else {
+      this.whisper();
+      this.noise(0.7, 540, 0.05, 'bandpass', 0.1, 280, -pan);
+      this.tone(820, 0.2, 'sine', 0.018, 380, 0.1, pan);
+    }
+    this.tone(31, 1.0, 'triangle', 0.18, 20, 0.04, pan);
+    this.noise(0.3, 280, 0.1, 'lowpass', 0.16, 90, pan);
   }
 
   /** Ragged breathing after a sprint, also used when fear peaks. */

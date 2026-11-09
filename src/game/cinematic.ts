@@ -9,6 +9,16 @@ export interface CaughtScene {
   playerName: string;
 }
 
+export type JumpScareSource = 'monster' | 'apparition' | 'fuse';
+
+export interface JumpScareScene {
+  t: number;
+  duration: number;
+  kind: MonsterKind;
+  seed: number;
+  source: JumpScareSource;
+}
+
 type Rand = () => number;
 type Rgb = readonly [number, number, number];
 
@@ -1145,5 +1155,107 @@ export function drawCaughtCutscene(
     ctx.fillStyle = `rgba(0, 0, 0, ${finalFade})`;
     ctx.fillRect(0, 0, w, h);
   }
+  ctx.restore();
+}
+
+export function drawJumpScare(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  scene: JumpScareScene,
+  reducedFx: boolean
+): void {
+  const p = Math.max(0, Math.min(1, scene.t / scene.duration));
+  const rand = mulberry32(scene.seed);
+  const frameRand = mulberry32((scene.seed ^ (Math.floor(scene.t * 60) * 0x9e3779b9)) >>> 0);
+  const appear = smoothstep(0, 0.16, p);
+  const fade = 1 - smoothstep(0.68, 1, p);
+  const flash = Math.max(0, 1 - smoothstep(0, 0.14, p));
+  const tint = scene.source === 'apparition' ? [28, 68, 70] : [126, 18, 13];
+
+  ctx.save();
+  if (!reducedFx) {
+    const jolt = (1 - smoothstep(0.04, 0.5, p)) * 13;
+    ctx.translate((frameRand() - 0.5) * jolt, (frameRand() - 0.5) * jolt);
+  }
+
+  ctx.fillStyle = '#020203';
+  ctx.fillRect(-30, -30, w + 60, h + 60);
+
+  if (flash > 0.001) {
+    ctx.fillStyle = `rgba(238, 226, 204, ${flash * (reducedFx ? 0.05 : 0.26)})`;
+    ctx.fillRect(-30, -30, w + 60, h + 60);
+  }
+  const pulse = p > 0.06 && p < 0.22 ? 1 - Math.abs(p - 0.14) / 0.08 : 0;
+  if (pulse > 0) {
+    ctx.fillStyle = `rgba(${tint[0]}, ${tint[1]}, ${tint[2]}, ${pulse * (reducedFx ? 0.06 : 0.2)})`;
+    ctx.fillRect(-30, -30, w + 60, h + 60);
+  }
+
+  const glow = ctx.createRadialGradient(w / 2, h * 0.46, 6, w / 2, h * 0.46, Math.max(w, h) * 0.62);
+  glow.addColorStop(0, `rgba(${tint[0]}, ${tint[1]}, ${tint[2]}, ${0.3 * fade})`);
+  glow.addColorStop(0.52, `rgba(${tint[0] * 0.5}, ${tint[1] * 0.5}, ${tint[2] * 0.5}, ${0.13 * fade})`);
+  glow.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.save();
+  const scale = (Math.min(w, h) / 235) * (0.72 + smoothstep(0.01, 0.28, p) * 0.44);
+  ctx.translate(w / 2, h * 0.47 + (1 - appear) * h * 0.035);
+  ctx.rotate((rand() - 0.5) * 0.03 + Math.sin(p * 17) * 0.006);
+  ctx.scale(scale, scale);
+  ctx.globalAlpha = appear * fade;
+  if (scene.kind === 'crawler') drawCrawlerFace(ctx, p, rand);
+  else if (scene.kind === 'wailer') drawWailerFace(ctx, p, rand);
+  else drawStalkerFace(ctx, p, rand);
+  ctx.restore();
+
+  if (!reducedFx && p > 0.2) {
+    const reach = smoothstep(0.2, 0.58, p) * (1 - smoothstep(0.78, 1, p));
+    ctx.save();
+    ctx.globalAlpha = reach * 0.38;
+    ctx.filter = 'blur(4px)';
+    drawHand(ctx, w * 0.02, h * 0.87, (Math.min(w, h) / 620) * 1.65, 0.55, '#120c09', '#6c5c48', frameRand);
+    drawHand(ctx, w * 0.98, h * 0.9, (Math.min(w, h) / 620) * 1.65, -0.55, '#120c09', '#6c5c48', frameRand);
+    ctx.restore();
+  }
+
+  for (let i = 0; i < 130; i++) {
+    const x = frameRand() * w;
+    const y = frameRand() * h;
+    ctx.fillStyle = `rgba(220, 210, 190, ${frameRand() * 0.045})`;
+    ctx.fillRect(x, y, 1, 0.6 + frameRand() * 2.2);
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.075)';
+  for (let y = 0; y < h; y += 3) ctx.fillRect(0, y, w, 1);
+
+  const edge = ctx.createRadialGradient(
+    w / 2,
+    h * 0.47,
+    Math.min(w, h) * 0.26,
+    w / 2,
+    h * 0.47,
+    Math.max(w, h) * 0.72
+  );
+  edge.addColorStop(0, 'rgba(0,0,0,0)');
+  edge.addColorStop(0.6, 'rgba(0,0,0,0.24)');
+  edge.addColorStop(1, `rgba(0,0,0,${0.82 * fade})`);
+  ctx.fillStyle = edge;
+  ctx.fillRect(0, 0, w, h);
+
+  if (scene.source !== 'apparition') {
+    const after = smoothstep(0.62, 0.78, p) * (1 - smoothstep(0.82, 1, p));
+    if (after > 0.01) {
+      ctx.fillStyle = `rgba(132, 18, 12, ${after * (reducedFx ? 0.05 : 0.18)})`;
+      ctx.fillRect(0, 0, w, h);
+    }
+  }
+
+  if (!reducedFx && p > 0.08 && p < 0.14) {
+    const y = h * (0.2 + frameRand() * 0.55);
+    ctx.fillStyle = 'rgba(190, 180, 160, 0.08)';
+    ctx.fillRect(0, y, w, 2 + frameRand() * 5);
+  }
+
   ctx.restore();
 }

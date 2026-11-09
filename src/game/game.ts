@@ -20,7 +20,12 @@ import {
   type Vec,
 } from './dungeon';
 import { angleDiff, clamp, hash2, lerp, mulberry32 } from './rng';
-import { drawCaughtCutscene, type CaughtScene } from './cinematic';
+import {
+  drawCaughtCutscene,
+  drawJumpScare,
+  type CaughtScene,
+  type JumpScareScene,
+} from './cinematic';
 
 const TILE = 40;
 const BODY_RADIUS = 0.3;
@@ -181,6 +186,13 @@ export class Game {
   private breathClock = 3;
   private buzzClock = 2;
   private monsterCueClock = 3;
+  private jumpScare: JumpScareScene | null = null;
+  private jumpScareCd = 0;
+  private apparitionClock = 24;
+  private seenJumpScare = new Set<string>();
+  private fuseScareDone = false;
+  private whisperText: { text: string; t: number; life: number } | null = null;
+  private whisperClock = 38;
 
   private peers: PeerPresence[] = [];
   private hostId = '';
@@ -314,6 +326,10 @@ export class Game {
 
   setPaused(paused: boolean): void {
     this.paused = paused || this.ended;
+    if (paused) {
+      this.jumpScare = null;
+      this.whisperText = null;
+    }
     if (!paused) this.lastFrame = performance.now();
   }
 
@@ -758,6 +774,8 @@ export class Game {
   private die(): void {
     if (this.player.dead) return;
     this.player.dead = true;
+    this.jumpScare = null;
+    this.whisperText = null;
     this.player.flashlight = false;
     this.player.attackT = 0;
     this.deadAt = this.time;
@@ -850,6 +868,10 @@ export class Game {
     }
     if (kind === 'fuse') {
       this.audio.fuse();
+      if (bySelf && !this.fuseScareDone) {
+        this.fuseScareDone = true;
+        this.triggerJumpScare('stalker', 'fuse', 0.62, 0, true);
+      }
       if (this.fuses >= 3 && previousFuses < 3) {
         this.hooks.toast('The stairwell seal breaks. Get to the stairs.', 'info');
         this.audio.descend();
@@ -891,6 +913,13 @@ export class Game {
     this.splats = [];
     this.ripples = [];
     this.ghost = null;
+    this.jumpScare = null;
+    this.jumpScareCd = 0;
+    this.apparitionClock = 24;
+    this.seenJumpScare.clear();
+    this.fuseScareDone = false;
+    this.whisperText = null;
+    this.whisperClock = 38;
     this.ambientClock = 5;
     this.dripClock = 1.6;
     this.scareClock = 18;
@@ -1234,6 +1263,7 @@ export class Game {
     this.updateRemote(dt);
     this.updateParticles(dt);
     this.updateAtmosphere(dt);
+    this.updateScares(dt);
 
     // Dread rises near unseen things and in the dark.
     let nearest = 40;
@@ -1399,6 +1429,97 @@ export class Game {
     }
   }
 
+  private updateScares(dt: number): void {
+    if (this.jumpScare) {
+      this.jumpScare.t += dt;
+      if (this.jumpScare.t >= this.jumpScare.duration) this.jumpScare = null;
+    }
+    this.jumpScareCd = Math.max(0, this.jumpScareCd - dt);
+
+    if (this.whisperText) {
+      this.whisperText.t += dt;
+      if (this.whisperText.t >= this.whisperText.life) this.whisperText = null;
+    }
+
+    if (this.player.dead || this.ended || this.deathScene || this.descendTimer > 0) return;
+
+    // A hunter that gets close enough to see you gets one close-up. The face is
+    // a flinch, not a new monster: the real one is still in the room.
+    if (!this.jumpScare && this.jumpScareCd <= 0 && this.time > 8) {
+      let closest: Monster | null = null;
+      let closestDist = Infinity;
+      for (const monster of this.monsters.values()) {
+        if (!monster.hunt || this.seenJumpScare.has(monster.id)) continue;
+        const dist = Math.hypot(monster.x - this.player.x, monster.y - this.player.y);
+        if (dist < 0.8 || dist > 4.6) continue;
+        if (!lineOfSight(this.dungeon, monster.x, monster.y, this.player.x, this.player.y)) continue;
+        if (dist < closestDist) {
+          closestDist = dist;
+          closest = monster;
+        }
+      }
+      if (closest) {
+        this.seenJumpScare.add(closest.id);
+        const angle = Math.atan2(closest.y - this.player.y, closest.x - this.player.x);
+        const pan = Math.sin(angleDiff(angle, this.player.facing)) * 0.75;
+        this.triggerJumpScare(closest.kind, 'monster', 0.72, pan);
+      }
+    }
+
+    // Something that was not in the room a moment ago, when the silence gets
+    // long enough. This is the unreliable-narrator scare.
+    this.apparitionClock -= dt;
+    if (!this.jumpScare && this.jumpScareCd <= 0 && this.apparitionClock <= 0) {
+      this.apparitionClock = 38 + Math.random() * 34;
+      if (this.player.dread > 14 || this.time > 20) {
+        const kind: MonsterKind = this.floor >= 2 && Math.random() < 0.35 ? 'wailer' : 'stalker';
+        this.triggerJumpScare(kind, 'apparition', 0.5, (Math.random() - 0.5) * 1.2);
+      }
+    }
+
+    // Words in the dust, only when the mind is already primed.
+    this.whisperClock -= dt;
+    if (!this.jumpScare && this.whisperClock <= 0) {
+      this.whisperClock = 44 + Math.random() * 40;
+      if (this.player.dread > 30 || this.time > 65) {
+        const phrases = [
+          "DON'T LOOK BACK",
+          'IT KNOWS YOUR NAME',
+          'YOU ARE NOT ALONE',
+          'THE DARK IS BREATHING',
+        ];
+        this.whisperText = {
+          text: phrases[Math.floor(Math.random() * phrases.length)]!,
+          t: 0,
+          life: 2.6,
+        };
+        this.audio.whisper();
+      }
+    }
+  }
+
+  private triggerJumpScare(
+    kind: MonsterKind,
+    source: JumpScareScene['source'],
+    duration: number,
+    pan = 0,
+    force = false
+  ): void {
+    if (this.jumpScare || this.player.dead || this.ended || this.deathScene || this.paused) return;
+    if (!force && this.jumpScareCd > 0) return;
+    this.jumpScare = {
+      t: 0,
+      duration: this.reducedFx ? duration * 0.85 : duration,
+      kind,
+      seed: (Math.random() * 0xffffffff) >>> 0,
+      source,
+    };
+    this.jumpScareCd = 24 + Math.random() * 16;
+    this.whisperText = null;
+    this.shake = Math.max(this.shake, this.reducedFx ? 0.25 : 1.05);
+    this.audio.jumpScare(kind, source, pan);
+  }
+
   private spawnDrip(): void {
     for (let tries = 0; tries < 18; tries++) {
       const angle = Math.random() * Math.PI * 2;
@@ -1546,6 +1667,8 @@ export class Game {
   private endRun(cause: string): void {
     if (this.ended) return;
     this.ended = true;
+    this.jumpScare = null;
+    this.whisperText = null;
     this.endedCause = cause;
     if (!this.player.dead) {
       this.player.dead = true;
@@ -1764,6 +1887,9 @@ export class Game {
     this.drawFog(ctx, w, h);
     this.renderLighting(ctx, camX, camY, view);
     this.renderScreenEffects(ctx, w, h);
+    if (this.jumpScare) {
+      drawJumpScare(ctx, w, h, this.jumpScare, this.reducedFx);
+    }
     if (this.deathScene) {
       drawCaughtCutscene(ctx, w, h, this.deathScene, this.reducedFx);
     }
@@ -3355,6 +3481,23 @@ export class Game {
         ctx.fillRect(0, y, w, height);
         ctx.fillStyle = `rgba(40, 110, 115, ${0.04 + Math.random() * 0.06})`;
         ctx.fillRect(0, y + 1, w, Math.max(1, height - 1));
+      }
+    }
+
+    if (this.whisperText) {
+      const p = Math.min(1, this.whisperText.t / this.whisperText.life);
+      const alpha = Math.sin(p * Math.PI) * (this.reducedFx ? 0.2 : 0.38);
+      if (alpha > 0.01) {
+        ctx.save();
+        ctx.font = `${Math.max(14, Math.min(28, w * 0.035))}px Georgia, 'Times New Roman', serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const jitter = this.reducedFx ? 0 : (Math.random() - 0.5) * 1.4;
+        ctx.fillStyle = `rgba(222, 210, 190, ${alpha})`;
+        ctx.shadowColor = 'rgba(104, 18, 12, 0.8)';
+        ctx.shadowBlur = 18;
+        ctx.fillText(this.whisperText.text, w / 2 + jitter, h * 0.16);
+        ctx.restore();
       }
     }
 
