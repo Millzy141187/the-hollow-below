@@ -146,7 +146,8 @@ function randomCode(length = 4): string {
 }
 
 function randomSeed(): number {
-  return crypto.getRandomValues(new Uint32Array(1))[0] >>> 0;
+  // 0 is the "no room seed yet" sentinel joiners use.
+  return crypto.getRandomValues(new Uint32Array(1))[0] >>> 0 || 1;
 }
 
 function escapeHtml(value: string): string {
@@ -583,7 +584,7 @@ async function startSession(mode: Mode, requestedCode?: string): Promise<void> {
     });
     await net.connect();
     if (myAttempt !== attempt || cancelConnect) throw new Error('cancelled');
-    const found = await net.waitForPeers(3500);
+    const found = await net.waitForPeers(mode === 'join' ? 7000 : 1500, mode === 'join', mode === 'join');
     if (myAttempt !== attempt || cancelConnect) throw new Error('cancelled');
 
     if (mode === 'join') {
