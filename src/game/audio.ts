@@ -375,6 +375,36 @@ export class GameAudio {
     this.noise(0.4, 260, 0.07, 'bandpass', 0.05);
   }
 
+  /** A human throat, not the thing in the dark. */
+  humanScream(kind: 'hurt' | 'death' | 'panic', pan = 0, intensity = 1): void {
+    const v = Math.max(0.12, Math.min(1, intensity));
+    if (kind === 'hurt') {
+      this.tone(250, 0.34, 'sawtooth', 0.19 * v, 620, 0.015, pan);
+      this.tone(510, 0.24, 'triangle', 0.075 * v, 860, 0.03, pan);
+      this.noise(0.3, 1600, 0.085 * v, 'bandpass', 0.01, 2600, pan);
+      this.tone(88, 0.22, 'sine', 0.12 * v, 58, 0, pan);
+      return;
+    }
+
+    const death = kind === 'death';
+    const base = death ? 235 : 285;
+    const duration = death ? 1.35 : 1.05;
+    this.tone(base, duration, 'sawtooth', (death ? 0.23 : 0.19) * v, base * 3.05, 0.02, pan);
+    this.tone(
+      base * 1.55,
+      duration * 0.9,
+      'triangle',
+      (death ? 0.09 : 0.075) * v,
+      base * 3.8,
+      0.03,
+      pan
+    );
+    this.tone(base * 2.1, duration * 0.72, 'sine', 0.035 * v, base * 4.4, 0.04, pan);
+    this.tone(base * 1.6, death ? 0.95 : 0.68, 'sawtooth', 0.065 * v, 92, 0.16, pan);
+    this.noise(duration, 1250, 0.09 * v, 'bandpass', 0.02, 2300, pan);
+    this.tone(72, 0.55, 'sine', 0.14 * v, 48, 0, pan);
+  }
+
   pickup(): void {
     this.tone(520, 0.1, 'sine', 0.11);
     this.tone(780, 0.17, 'sine', 0.09, undefined, 0.09);

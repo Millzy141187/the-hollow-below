@@ -237,6 +237,7 @@ export class Game {
   private stepSound = 0;
   private lowLightWarned = false;
   private lowHpWarned = false;
+  private lastHurtScream = -10;
 
   constructor(options: GameOptions) {
     this.canvas = options.canvas;
@@ -410,6 +411,24 @@ export class Game {
         const kind = data.kind;
         this.audio.scream(isMonsterKind(kind) ? kind : 'wailer');
         this.shake = Math.min(1, this.shake + 0.22);
+        break;
+      }
+      case 'voice': {
+        const kind = data.kind;
+        if (kind !== 'hurt' && kind !== 'death' && kind !== 'panic') break;
+        const x = num(data.x, NaN);
+        const y = num(data.y, NaN);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) break;
+        const dx = x - this.player.x;
+        const dy = y - this.player.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 26) break;
+        const pan = clamp(
+          Math.sin(angleDiff(Math.atan2(dy, dx), this.player.facing)) * 0.9,
+          -0.9,
+          0.9
+        );
+        this.audio.humanScream(kind, pan, clamp(1 - dist / 30, 0.25, 1));
         break;
       }
       case 'take':
@@ -774,7 +793,13 @@ export class Game {
       0.9
     );
     this.audio.hurt();
-    if (this.player.hp <= 0) this.die();
+    if (this.player.hp <= 0) {
+      this.die();
+    } else if (this.time - this.lastHurtScream > 0.55) {
+      this.lastHurtScream = this.time;
+      this.audio.humanScream('hurt', 0, clamp(0.55 + amount / 40, 0.55, 1));
+      this.sendFn?.('voice', { kind: 'hurt', x: this.player.x, y: this.player.y });
+    }
   }
 
   private die(): void {
@@ -804,6 +829,8 @@ export class Game {
       alpha: 0.6,
     });
     this.audio.caught(killer);
+    this.audio.humanScream('death', 0, 1);
+    this.sendFn?.('voice', { kind: 'death', x: this.player.x, y: this.player.y });
     this.hooks.presence({ dead: true, hp: 0 });
     this.hooks.toast('You died in the dark.', 'blood');
     this.lastState = -1;
@@ -931,6 +958,7 @@ export class Game {
     this.unseenClock = 18;
     this.unseenCd = 0;
     this.panicCd = 0;
+    this.lastHurtScream = -10;
     this.audio.setStalk(0, 0, 'stalker');
     this.ambientClock = 5;
     this.dripClock = 1.6;
@@ -1604,6 +1632,8 @@ export class Game {
     this.whisperText = null;
     this.shake = Math.max(this.shake, this.reducedFx ? 0.25 : 1.05);
     this.audio.jumpScare(kind, source, pan);
+    this.audio.humanScream('panic', 0, 0.72);
+    this.sendFn?.('voice', { kind: 'panic', x: this.player.x, y: this.player.y });
   }
 
   private triggerDreadPanic(): void {
