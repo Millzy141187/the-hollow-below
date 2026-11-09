@@ -4141,7 +4141,7 @@ export class Game {
       ctx.fillRect(0, 0, w, h);
     }
 
-    if (this.pendingScare && !this.player.dead) {
+    if (this.pendingScare && !this.player.dead && !this.reducedFx) {
       const progress = clamp(this.pendingScare.t / 1.35, 0, 1);
       const edge = ctx.createRadialGradient(
         w / 2,
