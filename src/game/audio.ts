@@ -25,6 +25,7 @@ export type AmbientKind =
 export class GameAudio {
   private ac: AudioContext | null = null;
   private master: GainNode | null = null;
+  private compressor: DynamicsCompressorNode | null = null;
   private reverb: ConvolverNode | null = null;
   private wet: GainNode | null = null;
   private droneFilter: BiquadFilterNode | null = null;
@@ -60,8 +61,18 @@ export class GameAudio {
 
       const master = ac.createGain();
       master.gain.value = this.muted ? 0 : 0.55;
-      master.connect(ac.destination);
+      // Keep surprise impacts frightening without letting layered procedural
+      // cues clip or become painful on headphones.
+      const compressor = ac.createDynamicsCompressor();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 16;
+      compressor.ratio.value = 7;
+      compressor.attack.value = 0.005;
+      compressor.release.value = 0.22;
+      master.connect(compressor);
+      compressor.connect(ac.destination);
       this.master = master;
+      this.compressor = compressor;
 
       // A generated stone corridor: two channels of decaying noise give the
       // whole mix a place without shipping an impulse response file.
@@ -71,7 +82,7 @@ export class GameAudio {
       wet.gain.value = 0.19;
       master.connect(convolver);
       convolver.connect(wet);
-      wet.connect(ac.destination);
+      wet.connect(compressor);
       this.reverb = convolver;
       this.wet = wet;
 
@@ -361,10 +372,15 @@ export class GameAudio {
     this.tone(38, 0.19, 'sine', vol * 0.7, 30, 0.19);
   }
 
-  step(): void {
+  step(sprinting = false): void {
     const scuff = Math.random();
-    this.noise(0.055, 360 + scuff * 190, 0.036 + scuff * 0.02, 'lowpass', 0, undefined, (Math.random() - 0.5) * 0.28);
-    if (scuff > 0.74) this.noise(0.09, 1500, 0.014, 'highpass', 0.015);
+    const weight = sprinting ? 1.55 : 1;
+    const pan = (Math.random() - 0.5) * 0.28;
+    // A heel, a grit scrape, then a small stone settling under the sole.
+    this.tone(62 + scuff * 18, 0.09, 'sine', (0.025 + scuff * 0.016) * weight, 38, 0, pan);
+    this.noise(0.065, 290 + scuff * 230, (0.032 + scuff * 0.018) * weight, 'lowpass', 0.006, 110, pan);
+    if (scuff > 0.5) this.noise(0.075, 1150 + scuff * 850, 0.012 * weight, 'highpass', 0.018, undefined, pan);
+    if (sprinting && scuff > 0.35) this.noise(0.11, 700, 0.014, 'bandpass', 0.025, 380, -pan);
   }
 
   swing(): void {
@@ -450,11 +466,20 @@ export class GameAudio {
   /** The moment a hunter's attention lands on a player. */
   detected(kind: MonsterKind, pan = 0, intensity = 1): void {
     const v = Math.max(0.12, Math.min(1, intensity));
-    this.noise(0.16, 5200, 0.2 * v, 'highpass', 0, undefined, pan);
-    this.tone(29, 0.85, 'sine', 0.3 * v, 20, 0, pan);
-    this.noise(0.55, 1200, 0.08 * v, 'bandpass', 0.02, 260, pan);
-    this.scream(kind, pan, v * 0.92);
-    this.tone(1480, 0.33, 'sawtooth', 0.035 * v, 220, 0.03, -pan * 0.5);
+    // Detection is a held breath, not an immediate blast. The charge is what
+    // earns the scream a moment later.
+    this.noise(0.12, 4300, 0.11 * v, 'highpass', 0, undefined, pan);
+    this.tone(31, 0.78, 'sine', 0.23 * v, 20, 0, pan);
+    this.noise(0.48, kind === 'crawler' ? 1900 : 780, 0.045 * v, 'bandpass', 0.02, 220, pan);
+    this.tone(kind === 'wailer' ? 610 : 170, 0.26, 'triangle', 0.028 * v, 94, 0.06, -pan * 0.5);
+  }
+
+  /** The stare breaks: the sound that tells the player to run. */
+  charge(kind: MonsterKind, pan = 0, intensity = 1): void {
+    const v = Math.max(0.12, Math.min(1, intensity));
+    this.noise(0.08, 5100, 0.16 * v, 'highpass', 0, undefined, pan);
+    this.tone(kind === 'wailer' ? 72 : 46, 0.65, 'sine', 0.23 * v, 24, 0, pan);
+    this.scream(kind, pan, v * 0.76);
   }
 
   descend(): void {
@@ -656,8 +681,16 @@ export class GameAudio {
   }
 
   lightBuzz(): void {
-    this.tone(118, 0.07, 'square', 0.009, 96);
-    this.noise(0.05, 4400, 0.012, 'highpass');
+    const pitch = 92 + Math.random() * 48;
+    this.tone(pitch, 0.06, 'square', 0.011, pitch * 0.68);
+    this.tone(pitch * 2.02, 0.035, 'sine', 0.006, pitch * 1.5, 0.018);
+    this.noise(0.06, 3600 + Math.random() * 1400, 0.014, 'highpass');
+  }
+
+  lightFail(): void {
+    this.noise(0.16, 2600, 0.055, 'bandpass', 0, 180);
+    this.tone(94, 0.26, 'square', 0.032, 38);
+    this.noise(0.32, 320, 0.025, 'lowpass', 0.04, 90);
   }
 
   flashlightClick(on: boolean): void {

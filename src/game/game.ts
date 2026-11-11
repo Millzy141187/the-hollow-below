@@ -271,6 +271,7 @@ export class Game {
   private lowLightWarned = false;
   private lowHpWarned = false;
   private lastHurtScream = -10;
+  private lastStare = new Map<string, number>();
 
   constructor(options: GameOptions) {
     this.canvas = options.canvas;
@@ -1190,6 +1191,20 @@ export class Game {
         monster.phase += dt * (monster.hunt ? 4.5 : 1.4);
         monster.flash = Math.max(0, monster.flash - dt);
         monster.attackT = Math.max(0, monster.attackT - dt);
+        const previousStare = this.lastStare.get(monster.id) ?? monster.stare;
+        if (previousStare > 0.05 && monster.stare <= 0.05) {
+          const dx = monster.x - this.player.x;
+          const dy = monster.y - this.player.y;
+          const dist = Math.hypot(dx, dy);
+          if (!this.player.dead && dist < 18) {
+            this.audio.charge(
+              monster.kind,
+              Math.sin(angleDiff(Math.atan2(dy, dx), this.player.facing)) * 0.9,
+              clamp(1 - dist / 18, 0.2, 1)
+            );
+          }
+        }
+        this.lastStare.set(monster.id, monster.stare);
       }
       return;
     }
@@ -1251,6 +1266,18 @@ export class Game {
       if (monster.stare > 0.01) {
         monster.stare = Math.max(0, monster.stare - dt);
         monster.phase += dt * 2.4;
+        if (monster.stare <= 0.01) {
+          const dx = monster.x - this.player.x;
+          const dy = monster.y - this.player.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 18) {
+            this.audio.charge(
+              monster.kind,
+              Math.sin(angleDiff(Math.atan2(dy, dx), this.player.facing)) * 0.9,
+              clamp(1 - dist / 18, 0.2, 1)
+            );
+          }
+        }
         continue;
       }
 
@@ -1410,7 +1437,7 @@ export class Game {
         p.stepT -= dt;
         if (p.stepT <= 0) {
           p.stepT = sprinting ? 0.24 : 0.36;
-          this.audio.step();
+          this.audio.step(sprinting);
           if (Math.random() < 0.3) {
             this.spawnParticle({
               x: p.x + (Math.random() - 0.5) * 0.4,
@@ -1435,7 +1462,7 @@ export class Game {
         p.battery = Math.max(0, p.battery - dt * 0.7);
         if (p.battery <= 0) {
           p.flashlight = false;
-          this.audio.deny();
+          this.audio.lightFail();
           this.hooks.toast('Your flashlight dies.', 'warn');
         } else if (p.battery < 15 && !this.lowLightWarned) {
           this.lowLightWarned = true;
@@ -3320,7 +3347,8 @@ export class Game {
     ctx.save();
     ctx.translate(px + Math.cos(facing) * lunge, py + Math.sin(facing) * lunge);
     ctx.rotate(facing + Math.PI / 2 + twitch);
-    const breathe = 1 + Math.sin(monster.phase * 1.7 + monster.x) * 0.018;
+    const starePulse = monster.stare > 0 ? 1 + Math.sin(this.time * 14) * 0.035 : 1;
+    const breathe = (1 + Math.sin(monster.phase * 1.7 + monster.x) * 0.018) * starePulse;
     ctx.scale(1.1 * breathe, 1.1 / breathe);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -3332,6 +3360,20 @@ export class Game {
       this.drawWailerDemon(ctx, sway, hunting, attacking);
     } else {
       this.drawStalkerDemon(ctx, sway, hunting, attacking);
+    }
+
+    if (monster.stare > 0 && !this.reducedFx) {
+      const glow = 0.3 + Math.sin(this.time * 16) * 0.12;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = `rgba(210, 38, 25, ${glow})`;
+      ctx.shadowColor = 'rgba(255, 45, 28, 0.95)';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.ellipse(-3, -18, 2.1, 1.2, 0, 0, Math.PI * 2);
+      ctx.ellipse(3, -18, 2.1, 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalCompositeOperation = 'source-over';
     }
 
     if (monster.flash > 0) {
@@ -4196,6 +4238,7 @@ export class Game {
       }
     }
 
+    const lowBattery = this.player.battery < 18 && this.player.flashlight && !this.player.dead;
     const vignette = ctx.createRadialGradient(
       w / 2,
       h / 2,
@@ -4205,8 +4248,8 @@ export class Game {
       Math.max(w, h) * 0.76
     );
     vignette.addColorStop(0, 'rgba(0,0,0,0)');
-    vignette.addColorStop(0.6, 'rgba(0,0,0,0.18)');
-    vignette.addColorStop(1, 'rgba(0,0,0,0.88)');
+    vignette.addColorStop(0.6, `rgba(0,0,0,${lowBattery ? 0.24 : 0.18})`);
+    vignette.addColorStop(1, `rgba(0,0,0,${lowBattery ? 0.93 : 0.88})`);
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, w, h);
 
